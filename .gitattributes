@@ -1,0 +1,24 @@
+# 源文件统一按 LF 存储，checkout 时转成 CRLF（Windows 开发环境友好）。
+*.ts       text eol=lf
+*.js       text eol=lf
+*.json     text eol=lf
+*.css      text eol=lf
+*.html     text eol=lf
+*.md       text eol=lf
+*.mjs      text eol=lf
+
+# 字形文件必须**逐字节**保持原样。
+#
+# 演示子集（demos/glyphs/）是上游文件的逐字节副本，
+# `demos/data/PROVENANCE.md` 里逐个记了上游的 sha256——别人 clone 下来
+# 要能拿这些 sha256 对回去。所以这里**不做行尾转换**：
+# 本机 `core.autocrlf=true`，不写 `-text` 的话 checkout 时 LF 会被换成 CRLF，
+# sha256 全变，provenance 就对不上了。
+*.svg      -text
+*.txt      -text
+
+# 二进制与生成物不做行尾转换
+*.png      binary
+*.jpg      binary
+*.woff2    binary
+package-lock.json text eol=lf

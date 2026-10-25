@@ -1,0 +1,39 @@
+# 编译产物
+dist/
+node_modules/
+*.tsbuildinfo
+
+# 字形素材：本地使用，不随库发布
+# 这些字形来自 hanzi-glyphs-svg（含本地未发布层），许可状态由作者另行确认；
+# 本仓库只发布算法与代码，不发布任何字形文件。
+assets/
+
+# 派生的数据集：由 tools/build_data.ts 从 assets/ 生成，同样不入库
+# **只忽略仓库根下的 data/**；src/data/ 是源码（类型定义），必须入库——
+# 早先写成 `data/` 会按任意层级的目录名匹配，把 `src/data/types.ts` 一起挡在库外，
+# 结果 clone 下来 typecheck 直接报「找不到 ./data/types.ts」。
+/data/
+# 但**演示用的子集**要入库——它让演示页开箱即用：
+# demos/data/ 里是字形子集、索引、偏旁形码本、笔顺数据与出处说明。
+!demos/data/
+
+# 日志与临时文件
+*.log
+temp/
+tmp/
+
+# 编辑器与系统
+.DS_Store
+Thumbs.db
+desktop.ini
+.idea/
+.vscode/
+
+# 技能库联接（机器本地，不进版本库）
+.agents/skills/
+
+# 临时探针页（调试用，不入库）
+_probe*.html
+
+# 一次性调试脚本
+tests/debug-*.ts

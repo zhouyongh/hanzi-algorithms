@@ -1,0 +1,286 @@
+<!DOCTYPE html>
+<html lang="zh-Hans">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>字形演变 · 汉字算法库</title>
+<link rel="stylesheet" href="./lib/demo.css">
+</head>
+<body>
+<header>
+  <h1>字形演变：一个字怎么从甲骨变成小篆</h1>
+  <p class="sub">
+    左边是早期的字，右边是晚期的字，中间那栏是过渡。拖滑块或点播放，看这个字怎么一步步变过去：
+    深色是形状在变的笔画，绿的是消失的，赭色是新长出来的。
+    <b class="muted">中间形态是算出来的过渡形，不是任何历史书体的摹本。</b>
+  </p>
+  <nav>
+    <a href="./index.html">总览</a>
+    <a href="./index.html#radical">部首定位</a>
+    <a href="./index.html#stroke">笔画动画</a>
+    <a href="./index.html#evolution" aria-current="page">字形演变</a>
+    <a href="./index.html#lishu">隶变算法</a>
+    <a href="./index.html#vertical">竖排版式</a>
+    <a href="./index.html#lab">教学实验室</a>
+    <a href="./index.html#trace">描红练习</a>
+  </nav>
+</header>
+
+<main>
+  <div class="panel">
+    <div class="toolbar">
+      <input type="search" id="q" placeholder="现代字，如 日 / 月 / 山" value="日" size="8">
+      <button id="go" class="primary">载入</button>
+      <span class="muted" id="status"></span>
+    </div>
+    <div class="grid" id="quick"></div>
+  </div>
+
+  <div class="stage">
+    <div class="panel">
+      <h2>演变<span class="hint">拖动滑块看连续形变</span></h2>
+
+      <div class="triple">
+        <figure>
+          <svg id="src" viewBox="0 0 200 200"></svg>
+          <figcaption>源<span class="muted" id="src-name"></span></figcaption>
+        </figure>
+        <figure>
+          <svg id="glyph" viewBox="0 0 200 200"></svg>
+          <figcaption>中间形<span class="muted">（算法生成）</span></figcaption>
+        </figure>
+        <figure>
+          <svg id="dst" viewBox="0 0 200 200"></svg>
+          <figcaption>目标<span class="muted" id="dst-name"></span></figcaption>
+        </figure>
+      </div>
+
+      <div class="toolbar" style="margin-top:12px">
+        <label>形变进度</label>
+        <input type="range" id="t" min="0" max="100" value="0" style="flex:1">
+        <span class="muted" id="tlabel">0%</span>
+        <button id="play" class="primary">▶ 播放</button>
+        <button id="replay">↺ 重播</button>
+      </div>
+
+      <div class="legend" style="margin-top:10px">
+        <span><i style="background:#1c1b18"></i>演变（形状变化）</span>
+        <span><i style="background:#3f5d52"></i>隐没（源里有，目标里没了）</span>
+        <span><i style="background:#8a6d3b"></i>浮出（目标里新增的笔画）</span>
+      </div>
+
+      <div class="row" style="margin-top:10px" id="chain"></div>
+    </div>
+
+    <div class="side">
+      <div class="panel">
+        <h2>演变链</h2>
+        <table class="kv">
+          <tr><th>现代字</th><td id="r-char">—</td></tr>
+          <tr><th>参与书体</th><td id="r-chain">—</td></tr>
+          <tr><th>源笔画</th><td id="r-from">—</td></tr>
+          <tr><th>目标笔画</th><td id="r-to">—</td></tr>
+          <tr><th>演变</th><td id="r-morph">—</td></tr>
+          <tr><th>隐没</th><td id="r-hide">—</td></tr>
+          <tr><th>浮出</th><td id="r-appear">—</td></tr>
+          <tr><th>对应关系</th><td id="r-corr">—</td></tr>
+          <tr><th>置信度</th><td id="r-conf">—</td></tr>
+        </table>
+        <p class="note warn" id="r-note"></p>
+      </div>
+      <div class="panel">
+        <h2>中间形是怎么来的</h2>
+        <ol style="margin:0;padding-left:1.4em;color:var(--muted);font-size:13px">
+          <li>先把两个字形各自缩放对齐到同一张画布上</li>
+          <li>再给源字形的每一笔，在目标字形里找最像的那一笔配对</li>
+          <li>配对上的两笔，按长度取同样多的点</li>
+          <li>然后一格一格往中间挪，滑块每一格都是一个能看的字</li>
+          <li>配不上的：源里那一笔渐渐缩没，目标里那一笔渐渐长出来</li>
+        </ol>
+      </div>
+    </div>
+  </div>
+</main>
+
+<script src="./lib/vendor/anime.iife.min.js"></script>
+<script src="./lib/hanzi-algorithms.js"></script>
+<script src="./lib/demo.js"></script>
+<script>
+const H = window.HanziAlgorithms;
+const { loadGlyph, loadIndex, el, missingAssets, pathData } = window.HanziDemo;
+
+const $ = (id) => document.getElementById(id);
+let indexes = {};
+let chain = [];        // [{layer, glyph}]
+let fromGlyph = null;
+let toGlyph = null;
+let corr = null;
+let tl = null;
+let state = { t: 0 };
+
+const LAYERS = ["oracle", "bronze", "seal", "clerical"];
+const LAYER_NAMES = { oracle: "甲骨", bronze: "金文", seal: "篆", clerical: "隶" };
+
+const COLOR = {
+  morph: "#1c1b18",
+  disappear: "#3f5d52",
+  appear: "#8a6d3b",
+};
+
+async function init() {
+  const loaded = await Promise.all(LAYERS.map(async (layer) => {
+    try {
+      return [layer, await loadIndex(layer)];
+    } catch {
+      return [layer, null];
+    }
+  }));
+  for (const [layer, idx] of loaded) {
+    if (idx) indexes[layer] = idx;
+  }
+  if (Object.keys(indexes).length === 0) {
+    missingAssets($("quick").parentElement);
+    return;
+  }
+  for (const ch of ["日", "月", "山", "水", "木", "目", "火", "田", "人", "大", "马", "鱼"]) {
+    $("quick").appendChild(el("button", { text: ch, onclick: () => { $("q").value = ch; run(ch); } }));
+  }
+  $("go").addEventListener("click", () => run($("q").value.trim()));
+  $("t").addEventListener("input", () => { stop(); state.t = Number($("t").value) / 100; render(state.t); });
+  $("play").addEventListener("click", toggle);
+  $("replay").addEventListener("click", () => { stop(); state.t = 0; render(0); play(); });
+  await run($("q").value.trim());
+}
+
+async function run(char) {
+  if (!char) return;
+  stop();
+  $("status").textContent = "检索中…";
+  // 串行取各书体的字形：并发取多个字形在有些浏览器环境里响应落不下来
+  // （请求到了服务器、响应也发出去了，但前端的 promise 永不 settle）。
+  const found = [];
+  for (const layer of LAYERS) {
+    const file = indexes[layer]?.[char];
+    if (!file) continue;
+    const g = await loadGlyph(layer, file);
+    if (g) found.push({ layer, glyph: g, file });
+  }
+  chain = found;
+  $("status").textContent = "";
+  if (chain.length < 2) {
+    $("status").textContent = `「${char}」在已同步的书体里不足两种，无法演示形变`;
+    $("chain").innerHTML = "";
+    $("glyph").innerHTML = "";
+    $("src").innerHTML = "";
+    $("dst").innerHTML = "";
+    return;
+  }
+
+  fromGlyph = chain[0].glyph;
+  toGlyph = chain[chain.length - 1].glyph;
+  corr = H.correspondStrokes(fromGlyph, toGlyph);
+
+  // 源里被配上的笔画 → 演变；没配上的 → 隐没
+  // 目标里被配上的 → 演变；没配上的 → 浮出
+  const pairedFrom = new Set(corr.pairs.map((p) => p.from));
+  const pairedTo = new Set(corr.pairs.map((p) => p.to));
+  const fromRole = fromGlyph.paths.map((_, i) => (pairedFrom.has(i) ? "morph" : "disappear"));
+  const toRole = toGlyph.paths.map((_, i) => (pairedTo.has(i) ? "morph" : "appear"));
+
+  $("r-char").textContent = char;
+  $("r-chain").textContent = chain.map((c) => LAYER_NAMES[c.layer]).join(" → ");
+  $("r-from").textContent = `${fromGlyph.paths.length} 笔`;
+  $("r-to").textContent = `${toGlyph.paths.length} 笔`;
+  $("r-morph").textContent = `${corr.pairs.length} 笔`;
+  $("r-hide").textContent = `${fromGlyph.paths.length - pairedFrom.size} 笔`;
+  $("r-appear").textContent = `${toGlyph.paths.length - pairedTo.size} 笔`;
+  $("r-corr").textContent = corr.pairs.length
+    ? corr.pairs.map((p) => `${p.from}→${p.to}`).join("，")
+    : "无";
+  $("r-conf").textContent = corr.confidence.toFixed(3);
+  $("r-note").textContent = "中间形态是算出来的，只用来演示「形变」这件事，不是摹本。";
+
+  $("src-name").textContent = `（${LAYER_NAMES[chain[0].layer]}）`;
+  $("dst-name").textContent = `（${LAYER_NAMES[chain[chain.length - 1].layer]}）`;
+
+  // 书体链
+  $("chain").innerHTML = "";
+  chain.forEach((c) => {
+    $("chain").appendChild(el("span", {
+      class: "mono",
+      html: `<b>${LAYER_NAMES[c.layer]}</b> <span class="muted">${c.glyph.paths.length}笔</span>`,
+    }));
+  });
+
+  drawRole($("src"), fromGlyph, fromRole);
+  drawRole($("dst"), toGlyph, toRole);
+
+  state.t = 0;
+  $("t").value = "0";
+  render(0);
+}
+
+function drawRole(svg, g, roles) {
+  const vb = g.viewBox;
+  svg.setAttribute("viewBox", `${vb.x} ${vb.y} ${vb.width} ${vb.height}`);
+  svg.innerHTML = "";
+  g.paths.forEach((p, i) => {
+    const path = document.createElementNS("http://www.w3.org/2000/svg", "path");
+    path.setAttribute("d", pathData(p.subpaths));
+    const color = COLOR[roles[i]] || COLOR.morph;
+    if (p.filled) {
+      path.setAttribute("fill", color);
+      path.setAttribute("fill-rule", "nonzero");
+    } else {
+      path.setAttribute("fill", "none");
+      path.setAttribute("stroke", color);
+      path.setAttribute("stroke-width", String(p.strokeWidth));
+      path.setAttribute("stroke-linecap", "round");
+      path.setAttribute("stroke-linejoin", "round");
+    }
+    svg.appendChild(path);
+  });
+}
+
+function render(t) {
+  if (!fromGlyph || !toGlyph) return;
+  const detail = H.interpolateDetailed(fromGlyph, toGlyph, t, { samples: 96, resolution: 200 });
+  const svg = $("glyph");
+  svg.setAttribute("viewBox", "0 0 200 200");
+  svg.innerHTML = "";
+  detail.glyph.paths.forEach((p, i) => {
+    const path = document.createElementNS("http://www.w3.org/2000/svg", "path");
+    path.setAttribute("d", pathData(p.subpaths));
+    path.setAttribute("fill", COLOR[detail.roles[i]] || COLOR.morph);
+    path.setAttribute("fill-rule", "nonzero");
+    svg.appendChild(path);
+  });
+  $("tlabel").textContent = `${Math.round(t * 100)}%`;
+}
+
+function play() {
+  stop();
+  state.t = 0;
+  // 单向播放：源 → 目标。原来的实现是 0→100→0 的折返，看着像「反转动画」。
+  tl = window.Anime.createTimeline({
+    defaults: { ease: "inOutQuad" },
+    onUpdate: () => {
+      $("t").value = String(Math.round(state.t * 100));
+      render(state.t);
+    },
+    onComplete: () => { tl = null; },
+  });
+  tl.add(state, { t: 1, duration: 2600 });
+}
+
+function toggle() {
+  if (tl) { stop(); return; }
+  play();
+}
+
+function stop() { if (tl) { try { tl.pause(); } catch { /* 忽略 */ } tl = null; } }
+
+init();
+</script>
+</body>
+</html>

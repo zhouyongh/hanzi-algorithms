@@ -1,0 +1,41 @@
+本仓库的对外许可分三层。
+
+## 代码 —— MIT
+
+`src/**`、`tools/**`、`demos/**`、`examples/**`、`tests/**` 采用 MIT License，
+全文见 [LICENSE-CODE](LICENSE-CODE)。
+
+## 文档 —— CC0 1.0
+
+`README.md`、`AGENTS.md`、`THIRD_PARTY_NOTICES.md` 等文档采用 CC0 1.0
+（公有领域奉献，无义务），全文见 [LICENSE-DOCS](LICENSE-DOCS)。
+
+## 数据 —— 不随库发布
+
+**除 `demos/glyphs/` 的演示子集外，本仓库不发布字形文件，也不发布全量派生数据集。**
+演示子集的逐层出处与署名要求见 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) 二之二节
+与 [demos/data/PROVENANCE.md](demos/data/PROVENANCE.md)。
+
+字形素材位于本地 `assets/` 目录，该目录已被 `.gitignore` 排除。它的来源是
+兄弟仓库 [`hanzi-glyphs-svg`](https://github.com/zhouyongh/hanzi-glyphs-svg)
+及其本地未发布分支：
+
+| 层 | 来源 | 许可状态 |
+|---|---|---|
+| 甲骨文 | JGW 参数化字形数据集（Zenodo，DOI `10.5281/zenodo.22467946`） | CC BY 4.0 |
+| 篆书 | 汉典「书法」小篆实例 | CC0 1.0 |
+| 金文 / 隶书 | 汉典「书法」对应书体实例 | CC0 1.0（上游已公开） |
+| 傳抄古文 / 楚简 | 汉典「书法」对应书体实例 | **未发布**（上游尚未公开，只在作者本地全量分支上） |
+
+`assets/` 里的字形仅供本地开发与测试使用。本仓库除演示子集外不对这些字形再分发，
+也不因此对它们的权利状况作任何声明。
+
+派生数据（`data/*.jsonl`，由 `tools/build_data.ts` 从 `assets/` 生成）同样
+不入库——它是字形的衍生结果，性质与字形相同。
+
+## 第三方字体
+
+若在本机演示中用到系统字体（Windows 自带的 `simsun` / `simkai` / `simhei` /
+`msyh` 等），那些字体**不随库分发**，仅作为本机渲染回退。开源字体（如
+Noto Serif CJK，SIL OFL 1.1）若被引入，其许可与署名见
+[THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)。

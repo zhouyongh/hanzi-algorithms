@@ -1,0 +1,253 @@
+<!DOCTYPE html>
+<html lang="zh-Hans">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>描红练习 · 汉字算法库</title>
+<link rel="stylesheet" href="./lib/demo.css">
+<style>
+  .pad { background:#fff; border:1px solid var(--line); border-radius:10px; overflow:hidden; touch-action:none; }
+  .pad svg { display:block; width:100%; height:auto; cursor: crosshair; }
+</style>
+</head>
+<body>
+<header>
+  <h1>描红练习：让算法给你打分</h1>
+  <p class="sub">
+    在浅色的字上描一遍，描完点「提交评分」：先看整体像不像，再看哪一笔最不像、哪一笔多写了。
+    左边可以换书体和字，勾上「连位置一起比」还会连字的摆位一起评。
+  </p>
+  <nav>
+    <a href="./index.html">总览</a>
+    <a href="./index.html#radical">部首定位</a>
+    <a href="./index.html#stroke">笔画动画</a>
+    <a href="./index.html#evolution">字形演变</a>
+    <a href="./index.html#lishu">隶变算法</a>
+    <a href="./index.html#vertical">竖排版式</a>
+    <a href="./index.html#lab">教学实验室</a>
+    <a href="./index.html#trace" aria-current="page">描红练习</a>
+  </nav>
+</header>
+
+<main>
+  <div class="panel">
+    <div class="toolbar">
+      <label>书体</label>
+      <select id="script">
+        <option value="oracle">甲骨文（描边字形，逐笔描）</option>
+        <option value="seal">篆书（墨迹轮廓）</option>
+      </select>
+      <input type="search" id="q" placeholder="现代字" value="天" size="8">
+      <button id="go" class="primary">载入</button>
+      <span class="muted" id="status"></span>
+    </div>
+  </div>
+
+  <div class="stage">
+    <div class="panel">
+      <h2>描红底本<span class="hint">在格子里用鼠标描</span></h2>
+      <div class="pad" id="pad">
+        <svg id="template" viewBox="0 0 100 100" preserveAspectRatio="xMidYMid meet"></svg>
+      </div>
+      <div class="toolbar" style="margin-top:12px">
+        <button id="submit" class="primary">提交评分</button>
+        <button id="clear">清空重描</button>
+        <label><input type="checkbox" id="strict"> 连位置一起比</label>
+        <span class="muted" id="hint">按住鼠标左键描</span>
+      </div>
+    </div>
+
+    <div class="side">
+      <div class="panel">
+        <h2>评分</h2>
+        <table class="kv">
+          <tr><th>总分</th><td id="r-score">—</td></tr>
+          <tr><th>整体形似</th><td id="r-iou">—</td></tr>
+          <tr><th>写对笔画</th><td id="r-correct">—</td></tr>
+          <tr><th>最差的一笔</th><td id="r-worst">—</td></tr>
+          <tr><th>多写的笔画</th><td id="r-extra">—</td></tr>
+        </table>
+        <p class="note" id="r-note"></p>
+      </div>
+      <div class="panel">
+        <h2>逐笔得分</h2>
+        <table class="kv">
+          <tr><th>笔画</th><th>得分</th><th>覆盖</th><th>精确</th></tr>
+          <tbody id="r-rows"></tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+</main>
+
+<script src="./lib/hanzi-algorithms.js"></script>
+<script src="./lib/demo.js"></script>
+<script>
+const H = window.HanziAlgorithms;
+const { loadGlyph, loadIndex, pathData, el } = window.HanziDemo;
+
+const $ = (id) => document.getElementById(id);
+const NS = "http://www.w3.org/2000/svg";
+
+let indexes = {};
+let glyph = null;
+let template = null;
+let vb = { x: 0, y: 0, width: 100, height: 100 };
+const strokes = [];      // 学生的笔迹：[[{x,y}...], ...]
+let drawing = null;
+
+async function init() {
+  const layers = await Promise.all(["oracle", "seal"].map(async (layer) => {
+    try { return [layer, await loadIndex(layer)]; } catch { return [layer, null]; }
+  }));
+  for (const [layer, idx] of layers) if (idx) indexes[layer] = idx;
+
+  $("go").addEventListener("click", () => load($("q").value.trim(), $("script").value));
+  $("submit").addEventListener("click", submit);
+  $("clear").addEventListener("click", clear);
+  bindPad();
+  await load($("q").value.trim(), $("script").value);
+}
+
+async function load(char, layer) {
+  const file = indexes[layer]?.[char];
+  if (!file) { $("status").textContent = `${layer === "oracle" ? "甲骨文" : "篆书"}层没有「${char}」`; return; }
+  glyph = await loadGlyph(layer, file);
+  vb = glyph.viewBox;
+  template = H.buildTraceTemplate(glyph);
+
+  const svg = $("template");
+  svg.setAttribute("viewBox", `${vb.x} ${vb.y} ${vb.width} ${vb.height}`);
+  svg.innerHTML = "";
+
+  // 描红底本：浅色
+  for (const s of template.strokes) {
+    const p = document.createElementNS(NS, "path");
+    if (s.kind === "stroke") {
+      p.setAttribute("d", `M ${s.points.map((q) => `${q.x.toFixed(2)},${q.y.toFixed(2)}`).join(" L ")}`);
+      p.setAttribute("fill", "none");
+      p.setAttribute("stroke", "#d8d0bd");
+      p.setAttribute("stroke-width", String(s.width));
+      p.setAttribute("stroke-linecap", "round");
+      p.setAttribute("stroke-linejoin", "round");
+    } else {
+      p.setAttribute("d", pathData(s.subpaths));
+      p.setAttribute("fill", "#eae4d6");
+      p.setAttribute("fill-rule", "nonzero");
+    }
+    svg.appendChild(p);
+  }
+  // 学生的笔迹单独一组，方便清空
+  const g = document.createElementNS(NS, "g");
+  g.id = "ink";
+  svg.appendChild(g);
+
+  $("status").textContent = "";
+  $("hint").textContent = `底本 ${template.strokes.length} 笔　按住鼠标左键描`;
+  clear();
+}
+
+function redraw() {
+  const g = document.getElementById("ink");
+  if (!g) return;
+  g.innerHTML = "";
+  for (const s of strokes) {
+    if (s.length < 2) continue;
+    const p = document.createElementNS(NS, "path");
+    p.setAttribute("d", `M ${s.map((q) => `${q.x.toFixed(2)},${q.y.toFixed(2)}`).join(" L ")}`);
+    p.setAttribute("fill", "none");
+    p.setAttribute("stroke", "#1c1b18");
+    p.setAttribute("stroke-width", String(vb.width * 0.04));
+    p.setAttribute("stroke-linecap", "round");
+    p.setAttribute("stroke-linejoin", "round");
+    g.appendChild(p);
+  }
+}
+
+/** 屏幕坐标 → 字形用户单位。 */
+function toUser(ev) {
+  const svg = $("template");
+  const rect = svg.getBoundingClientRect();
+  return {
+    x: vb.x + ((ev.clientX - rect.left) / rect.width) * vb.width,
+    y: vb.y + ((ev.clientY - rect.top) / rect.height) * vb.height,
+  };
+}
+
+function bindPad() {
+  const svg = $("template");
+  svg.addEventListener("pointerdown", (ev) => {
+    ev.preventDefault();
+    // 指针捕获对合成事件（自动化测试、某些辅助设备）可能抛错，
+    // 抛了就当没有捕获——不影响描红本身。
+    try { svg.setPointerCapture(ev.pointerId); } catch { /* 忽略 */ }
+    drawing = [toUser(ev)];
+    strokes.push(drawing);
+    redraw();
+  });
+  svg.addEventListener("pointermove", (ev) => {
+    if (!drawing) return;
+    drawing.push(toUser(ev));
+    redraw();
+  });
+  const end = () => { drawing = null; };
+  svg.addEventListener("pointerup", end);
+  svg.addEventListener("pointercancel", end);
+}
+
+function clear() {
+  strokes.length = 0;
+  redraw();
+  for (const id of ["r-score", "r-iou", "r-correct", "r-worst", "r-extra"]) $(id).textContent = "—";
+  $("r-rows").innerHTML = "";
+  $("r-note").textContent = "";
+}
+
+/** 把学生的笔迹转成一个字形对象，交给算法去比。 */
+function studentGlyph() {
+  const paths = strokes.filter((s) => s.length >= 2).map((s) =>
+    `<path d="M ${s.map((p) => `${p.x.toFixed(2)},${p.y.toFixed(2)}`).join(" L ")}" ` +
+    `fill="none" stroke="#111" stroke-width="${(vb.width * 0.04).toFixed(2)}" ` +
+    `stroke-linecap="round" stroke-linejoin="round"/>`);
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="${vb.x} ${vb.y} ${vb.width} ${vb.height}">${paths.join("")}</svg>`;
+  return H.parseGlyphSvg(svg);
+}
+
+function submit() {
+  if (!glyph) return;
+  if (strokes.filter((s) => s.length >= 2).length === 0) {
+    $("r-note").textContent = "先描几笔再提交。";
+    return;
+  }
+  const r = H.evaluateTracing(glyph, studentGlyph(), {
+    normalize: $("strict").checked ? "canvas" : "bbox",
+    resolution: 160,
+  });
+
+  $("r-score").textContent = `${(r.score * 100).toFixed(1)} 分`;
+  $("r-iou").textContent = `${(r.iou * 100).toFixed(1)}%`;
+  $("r-correct").textContent = `${r.correct} / ${r.total}`;
+  $("r-worst").textContent = r.worstStroke >= 0 ? `第 ${r.worstStroke + 1} 笔` : "—";
+  $("r-extra").textContent = r.extraStrokes.length ? `${r.extraStrokes.length} 笔` : "无";
+
+  const rows = $("r-rows");
+  rows.innerHTML = "";
+  for (const s of r.strokes) {
+    rows.appendChild(el("tr", {}, [
+      el("td", { text: `第 ${s.target + 1} 笔` }),
+      el("td", { text: s.score.toFixed(2) }),
+      el("td", { text: s.coverage.toFixed(2) }),
+      el("td", { text: s.precision.toFixed(2) }),
+    ]));
+  }
+  $("r-note").textContent = !r.orderCorrect
+    ? `笔顺反了：${r.orderNote}。每笔的得分是按形状算的，形状对了但顺序不对，同样要扣分。`
+    : r.correct === r.total
+      ? "全对。「覆盖」是范字这一笔被你盖住的比例，「精确」是你写的这一笔落在范字里的比例——偏了或画多了都要扣分。"
+      : `还有 ${r.total - r.correct} 笔没写好，重点看第 ${r.worstStroke + 1} 笔。`;
+}
+
+init();
+</script>
+</body>
+</html>

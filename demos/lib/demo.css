@@ -1,0 +1,271 @@
+/* ─────────────────────────────────────────────────────────────
+   演示页样式。
+
+   配色与字体取自兄弟仓库 `hanzi-relations` 的 viewer：
+   暖纸底、衬线字、低饱和的金褐 / 墨绿 / 赭红。
+   那边是古籍引文的阅读界面，这边是字形的核验界面——
+   **只借样式与色板，不借它的信息结构**。
+   ───────────────────────────────────────────────────────────── */
+
+:root {
+  --bg: #fbfaf7;        /* 暖纸底 */
+  --panel: #ffffff;
+  --ink: #1c1b18;        /* 墨 */
+  --mute: #6b6862;       /* 弱化 */
+  --line: #e3ded4;       /* 线 */
+  --accent: #8a6d3b;     /* 金褐：选中、强调 */
+  --accent2: #3f5d52;    /* 墨绿：次强调 */
+  --warn: #a1442f;       /* 赭红：警示 */
+  --accent-soft: #f3efe6;
+  --ok: #3f5d52;
+}
+
+* { box-sizing: border-box; }
+
+/* 原生控件（滑块、复选框）也用金褐——默认的蓝在暖纸底上很跳。 */
+body { accent-color: var(--accent); }
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--ink);
+  font: 16px/1.75 "Noto Serif CJK SC", "Source Han Serif SC", "Songti SC", Georgia, serif;
+}
+
+/* ── 头部：白底、细边、极淡的阴影，粘在顶上 ─────────────── */
+
+header {
+  background: var(--panel);
+  border-bottom: 1px solid var(--line);
+  padding: 18px 24px 0;
+  position: sticky;
+  top: 0;
+  z-index: 10;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, .04);
+}
+
+h1 { margin: 0 0 4px; font-size: 20px; letter-spacing: .02em; font-weight: 600; }
+.sub { color: var(--mute); font-size: 13px; margin: 0 0 14px; max-width: 78em; }
+.sub a { color: var(--accent); }
+
+nav {
+  display: flex; gap: 4px; border-bottom: 1px solid var(--line);
+  padding: 0 24px; flex-wrap: wrap; margin: 0 -24px; padding-left: 24px; padding-right: 24px;
+}
+nav a {
+  appearance: none; text-decoration: none; color: var(--mute);
+  padding: 9px 13px; font-size: 14px; border-bottom: 2px solid transparent;
+}
+nav a:hover { color: var(--ink); }
+nav a[aria-current="page"] { color: var(--ink); border-bottom-color: var(--accent); font-weight: 600; }
+
+main { padding: 18px 24px 48px; }
+
+/* ── 面板 ──────────────────────────────────────────────────── */
+
+.panel {
+  background: var(--panel); border: 1px solid var(--line); border-radius: 8px;
+  padding: 13px 15px; margin-bottom: 14px;
+}
+.panel h2 { font-size: 15px; margin: 0 0 10px; font-weight: 600; }
+.panel h2 .hint { font-weight: 400; color: var(--mute); font-size: 13px; margin-left: 8px; }
+
+.toolbar { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; margin-bottom: 12px; }
+.toolbar label { color: var(--mute); font-size: 14px; }
+
+input[type="search"], input[type="text"], select, textarea {
+  padding: 8px 11px; border: 1px solid var(--line); border-radius: 6px;
+  font: inherit; font-size: 15px; background: #fff; color: var(--ink);
+}
+input[type="search"]:focus, input[type="text"]:focus, select:focus, textarea:focus {
+  outline: 2px solid var(--accent); outline-offset: -1px;
+}
+input[type="search"] { min-width: 190px; }
+input[type="range"] { vertical-align: middle; }
+
+button, .btn {
+  appearance: none; border: 1px solid var(--line); border-radius: 6px;
+  background: #fff; color: var(--ink); padding: 8px 14px; font: inherit; font-size: 15px;
+  cursor: pointer;
+}
+button:hover { border-color: var(--accent); color: var(--accent); }
+button.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+button.primary:hover { color: #fff; filter: brightness(1.06); }
+button:disabled { opacity: .45; cursor: not-allowed; }
+
+.stage {
+  display: grid; grid-template-columns: minmax(280px, 1fr) minmax(260px, 380px);
+  gap: 14px; align-items: start;
+}
+@media (max-width: 900px) { .stage { grid-template-columns: 1fr; } }
+
+.canvas {
+  background: #fff; border: 1px solid var(--line); border-radius: 8px;
+  min-height: 380px; display: flex; align-items: center; justify-content: center;
+  padding: 12px; position: relative;
+}
+.canvas svg { width: 100%; height: auto; max-height: 460px; }
+
+/* ── 笔画动画页：楷书笔顺容器 ───────────────────────────────
+   楷书笔顺由 hanzi-writer 自己渲染（它要一个干净的容器），
+   所以它和本仓字形的 <svg> 是两个并列容器，切换时只换显示。 */
+#hw { width: 380px; height: 380px; flex: 0 0 auto; }
+#hw svg { display: block; }
+
+.side { display: flex; flex-direction: column; gap: 12px; }
+
+/* ── 键值表 ────────────────────────────────────────────────── */
+
+table.kv { width: 100%; border-collapse: collapse; font-size: 14px; }
+table.kv th, table.kv td { text-align: left; padding: 6px 6px; border-bottom: 1px solid var(--line); vertical-align: top; }
+table.kv th { color: var(--mute); font-weight: 400; width: 6.5em; }
+table.kv td { font-variant-numeric: tabular-nums; }
+table.kv tr:last-child th, table.kv tr:last-child td { border-bottom: 0; }
+
+/* ── 旁注 ──────────────────────────────────────────────────── */
+
+.note {
+  font-size: 13px; color: var(--mute); border-left: 3px solid var(--line);
+  padding: 3px 0 3px 11px; margin: 10px 0 0;
+}
+.note.warn { border-left-color: var(--warn); color: var(--warn); }
+.note.ok { border-left-color: var(--ok); color: var(--ok); }
+
+/* ── 小件：标签 / 卡片 / 小节标题 ───────────────────────────── */
+
+.tag {
+  font-size: 12px; padding: 1.5px 7px; border-radius: 3px;
+  background: #efe9dc; color: var(--accent); border: 1px solid #e2d9c6;
+  white-space: nowrap; display: inline-block;
+}
+.tag.duan { background: #e8f0ec; color: var(--accent2); border-color: #d5e2dc; }
+.tag.warn { background: #f6ebe7; color: var(--warn); border-color: #e6cfc9; }
+
+.card {
+  background: var(--panel); border: 1px solid var(--line); border-radius: 8px;
+  padding: 13px 15px; margin: 9px 0;
+}
+
+.sec {
+  margin: 22px 0 10px; padding-bottom: 5px; border-bottom: 1px solid var(--line);
+  font-size: 14px; color: var(--accent); letter-spacing: .06em;
+}
+
+/* ── 快捷字格 ──────────────────────────────────────────────── */
+
+.grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(74px, 1fr)); gap: 6px; }
+.grid button {
+  aspect-ratio: 1; padding: 0; font-size: 21px; line-height: 1;
+  display: flex; align-items: center; justify-content: center; border-radius: 6px;
+}
+.grid button[aria-pressed="true"] { border-color: var(--accent); background: var(--accent-soft); color: var(--accent); }
+
+.legend { display: flex; gap: 14px; flex-wrap: wrap; font-size: 13px; color: var(--mute); }
+.legend span { display: inline-flex; align-items: center; gap: 5px; }
+.legend i { width: 11px; height: 11px; border-radius: 3px; display: inline-block; }
+
+.loading, .empty { color: var(--mute); font-size: 14px; padding: 20px; text-align: center; }
+
+.row { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+.mono { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 12.5px; }
+
+/* ── 单页 Tab 浏览（demos/index.html）────────────────────────
+   结构照兄弟仓库 hanzi-glyphs-svg 的 viewer：一个页面，
+   nav[role=tablist] 切 .tabpanel，数据只取一次。            */
+
+nav[role="tablist"] { gap: 2px; }
+nav[role="tablist"] button {
+  appearance: none; border: 0; background: none; padding: 9px 14px;
+  font: inherit; font-size: 14px; color: var(--mute);
+  border-bottom: 2px solid transparent; cursor: pointer;
+}
+nav[role="tablist"] button:hover { color: var(--ink); }
+nav[role="tablist"] button[aria-selected="true"] {
+  color: var(--ink); border-bottom-color: var(--accent); font-weight: 600;
+}
+nav[role="tablist"] button .algo {
+  color: var(--mute); font-weight: 400; font-size: 12px; margin-left: 6px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}
+
+.tabpanel[hidden] { display: none; }
+.tabpanel-head {
+  display: flex; gap: 14px; align-items: flex-start; justify-content: space-between;
+  margin: 0 0 10px;
+}
+.tabpanel-head h2 { font-size: 16px; margin: 0 0 3px; font-weight: 600; }
+.tabpanel-head .sub { margin: 0; font-size: 13px; max-width: 78em; }
+.tabpanel-head .btn { text-decoration: none; white-space: nowrap; }
+.demo-frame {
+  width: 100%; height: min(76vh, 900px); border: 1px solid var(--line);
+  border-radius: 8px; background: #fff; display: block;
+}
+
+/* ── 嵌入模式：演示页被单页浏览页用 iframe 内嵌时 ───────────
+   外层已经有 Tab 栏，页内那排导航是重复的，藏掉。           */
+body.embed header { padding-bottom: 0; }
+body.embed header nav { display: none; }
+body.embed h1 { font-size: 17px; }
+body.embed main { padding-top: 10px; }
+
+/* ── 05-vertical：古籍版式页 ───────────────────────────────
+   只新增类（都带 classic- 前缀），不改既有类——别的演示页在用。 */
+
+.classic-stage {
+  overflow: auto;
+  align-items: flex-start;
+  padding: 18px;
+  background:
+    radial-gradient(120% 90% at 50% 0%, #fdfbf5 0%, #f3ecdd 55%, #e8dfc9 100%);
+}
+
+.classic-leaf { margin: 0 auto; display: block; }
+
+/* 半叶要按自然比例缩放：宽度自适应、高度不超过视口，
+   放不下就由容器滚动（.classic-stage 的 overflow:auto）。 */
+.classic-leaf svg {
+  width: auto;
+  height: auto;
+  max-width: 100%;
+  max-height: min(76vh, 860px);
+  display: block;
+  filter: drop-shadow(0 8px 20px rgba(70, 52, 24, .22));
+}
+
+/* 句读用朱笔：古籍里的句读多是后加的朱点。 */
+.classic-punct { fill: #9c2b21; }
+
+/* 沉到列右下角的句读：位置由脚本算好，这里只标一下。 */
+.classic-corner { opacity: .95; }
+
+.classic-punct-cell {
+  display: inline-block;
+  position: relative;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  margin: 3px;
+  background: #fff;
+}
+
+.classic-legend span { white-space: nowrap; }
+.classic-legend i { border-radius: 2px; }
+
+/* ── 三栏对照（演变 / 隶变演示页用）────────────────────────
+   源 / 中间 / 目标并排，中间那栏标「算法生成」。
+   用 grid 而不是 table：三栏要各自独立缩放，中间那栏
+   偶尔还会换成「对照缺失」的提示。                        */
+.triple {
+  display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px;
+}
+.triple figure { margin: 0; }
+.triple svg {
+  width: 100%; height: auto; aspect-ratio: 1 / 1;
+  background: #fff; border: 1px solid var(--line); border-radius: 8px;
+}
+.triple figcaption {
+  text-align: center; font-size: 13px; color: var(--ink);
+  margin-top: 5px; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}
+@media (max-width: 720px) {
+  .triple { grid-template-columns: 1fr; }
+}

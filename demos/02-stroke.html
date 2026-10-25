@@ -1,0 +1,405 @@
+<!DOCTYPE html>
+<html lang="zh-Hans">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>笔画动画 · 汉字算法库</title>
+<link rel="stylesheet" href="./lib/demo.css">
+</head>
+<body>
+<header>
+  <h1>笔画动画与描红</h1>
+  <p class="sub">
+    两种看法：选「现代楷书笔顺」，看这个字按教学笔顺一笔一笔写出来；
+    选「古文字字形」，看甲骨、篆书、金文、隶书的字形一笔一笔显现。
+    右边还能生成一份描红底本，照着描。
+  </p>
+  <nav>
+    <a href="./index.html">总览</a>
+    <a href="./index.html#radical">部首定位</a>
+    <a href="./index.html#stroke" aria-current="page">笔画动画</a>
+    <a href="./index.html#evolution">字形演变</a>
+    <a href="./index.html#lishu">隶变算法</a>
+    <a href="./index.html#vertical">竖排版式</a>
+    <a href="./index.html#lab">教学实验室</a>
+    <a href="./index.html#trace">描红练习</a>
+  </nav>
+</header>
+
+<main>
+  <div class="panel">
+    <div class="toolbar">
+      <label>模式</label>
+      <select id="mode">
+        <option value="kai">现代楷书笔顺（真实教学笔顺）</option>
+        <option value="glyph">古文字字形（甲骨 / 篆 / 金 / 隶）</option>
+      </select>
+      <select id="script" disabled>
+        <option value="oracle">甲骨文（描边字形，顺序即落笔顺序）</option>
+        <option value="seal">篆书（墨迹轮廓）</option>
+        <option value="bronze">金文</option>
+        <option value="clerical">隶书</option>
+      </select>
+      <input type="search" id="q" placeholder="现代字" value="天" size="8">
+      <button id="go" class="primary">载入</button>
+      <span class="muted" id="status"></span>
+    </div>
+    <p class="note" id="data-note"></p>
+  </div>
+
+  <div class="stage">
+    <div class="panel">
+      <h2><span id="title">字形</span><span class="hint" id="mode-hint"></span></h2>
+      <div class="canvas" id="canvas">
+        <svg id="glyph" viewBox="0 0 400 400"></svg>
+        <!-- 楷书笔顺由 hanzi-writer 自己渲染，它要一个自己的容器 -->
+        <div id="hw"></div>
+      </div>
+      <div class="toolbar" style="margin-top:12px">
+        <button id="play" class="primary">▶ 播放</button>
+        <button id="reset">↺ 重置</button>
+        <label>速度</label>
+        <input type="range" id="speed" min="60" max="900" step="20" value="380">
+        <span class="muted" id="counter"></span>
+      </div>
+      <p class="note" id="mode-note"></p>
+    </div>
+
+    <div class="side">
+      <div class="panel">
+        <h2>笔画序列</h2>
+        <table class="kv">
+          <tr><th>总笔画</th><td id="s-count">—</td></tr>
+          <tr><th>字形类型</th><td id="s-kind">—</td></tr>
+          <tr><th>viewBox</th><td id="s-vb">—</td></tr>
+        </table>
+        <ol id="s-list" style="margin:10px 0 0;padding-left:1.4em;color:var(--muted);font-size:13px"></ol>
+      </div>
+      <div class="panel">
+        <h2>描红</h2>
+        <p class="note" style="margin:0 0 8px">把字形压成浅色轮廓，照着它在浅色上描一遍——描红的底本就是它。</p>
+        <button id="trace">显示描红底本</button>
+        <p class="note" id="trace-note"></p>
+      </div>
+    </div>
+  </div>
+</main>
+
+<script src="./lib/vendor/anime.iife.min.js"></script>
+<script src="./lib/vendor/hanzi-writer.iife.min.js"></script>
+<script src="./lib/hanzi-algorithms.js"></script>
+<script src="./lib/demo.js"></script>
+<script>
+const H = window.HanziAlgorithms;
+const { loadGlyph, loadIndex, el, missingAssets, pathData } = window.HanziDemo;
+
+const $ = (id) => document.getElementById(id);
+let indexes = {};
+let glyph = null;
+let strokes = [];
+let writer = null;      // hanzi-writer 实例（现代楷书模式）
+let tl = null;          // anime.js 时间线（本仓字形模式）
+let shown = 0;
+
+const STROKE_ORDER_ROOT = "./data/stroke-order";
+
+/** 书体的中文名：给页面上的标题与提示用，别把 oracle / seal 这类内部代号露给读者。 */
+const LAYER_NAMES = { oracle: "甲骨文", seal: "篆书", bronze: "金文", clerical: "隶书" };
+
+async function init() {
+  const layers = ["oracle", "seal", "bronze", "clerical"];
+  const loaded = await Promise.all(layers.map(async (layer) => {
+    try {
+      return [layer, await loadIndex(layer)];
+    } catch {
+      return [layer, null];
+    }
+  }));
+  for (const [layer, idx] of loaded) {
+    if (idx) indexes[layer] = idx;
+  }
+
+  $("mode").addEventListener("change", () => {
+    const isKai = $("mode").value === "kai";
+    $("script").disabled = isKai;
+    load($("q").value.trim());
+  });
+  $("go").addEventListener("click", () => load($("q").value.trim()));
+  $("q").addEventListener("keydown", (e) => { if (e.key === "Enter") load($("q").value.trim()); });
+  $("play").addEventListener("click", toggle);
+  $("reset").addEventListener("click", reset);
+  $("trace").addEventListener("click", showTrace);
+  $("speed").addEventListener("input", () => { if (writer) writer.speed(Number($("speed").value) / 380); });
+
+  await load($("q").value.trim());
+}
+
+async function load(char) {
+  if (!char) return;
+  stopAll();
+  if ($("mode").value === "kai") {
+    await loadKai(char);
+  } else {
+    await loadGlyphLayer(char, $("script").value);
+  }
+}
+
+/* ── 现代楷书笔顺：hanzi-writer ───────────────────────────── */
+
+async function loadKai(char) {
+  $("status").textContent = "取笔顺数据…";
+  // 两种渲染方式各有一个容器，切换时只换显示——**不能把另一个从 DOM 里删掉**，
+  // 删了后面再取就是 null。
+  $("glyph").style.display = "none";
+  $("hw").style.display = "block";
+  $("hw").innerHTML = "";
+
+  const data = await fetchStrokeOrder(char);
+  if (!data) {
+    $("status").textContent = "";
+    $("data-note").textContent =
+      `本地没有「${char}」的笔顺数据。跑一次 \`node tools/sync_stroke_order.ts\` 同步 ` +
+      `（数据来自 hanzi-writer-data，Arphic Public License；仓库里只带了一小份演示用的）。`;
+    $("title").textContent = "楷书笔顺";
+    $("mode-hint").textContent = "（无数据）";
+    $("s-count").textContent = "—";
+    $("s-kind").textContent = "—";
+    $("s-vb").textContent = "—";
+    $("s-list").innerHTML = "";
+    $("counter").textContent = "";
+    return;
+  }
+
+  $("status").textContent = "";
+  $("data-note").textContent =
+    "笔顺数据来自 hanzi-writer-data（Arphic Public License，由 Arphic Technology 的字库抽取）。" +
+    "这是楷书笔顺，和甲骨、篆书、隶书字形不是同一套笔顺体系。";
+
+  const target = document.getElementById("hw");
+  // 参数顺序是 create(元素, 字, 配置)——不是 (字, 元素, 配置)
+  writer = window.HanziWriter.create(target, char, {
+    width: 380,
+    height: 380,
+    padding: 8,
+    showOutline: true,
+    strokeAnimationSpeed: 1,
+    delayBetweenStrokes: 220,
+    charDataLoader: (c, onComplete) => {
+      fetchStrokeOrder(c).then((d) => onComplete(d));
+    },
+  });
+
+  $("title").textContent = `楷书「${char}」`;
+  $("mode-hint").textContent = "真笔顺，逐笔书写";
+  $("s-count").textContent = `${data.strokes.length} 笔`;
+  $("s-kind").textContent = "楷书笔画轮廓（教学笔顺数据）";
+  const vb = data.strokes.length ? "1024 × 1024" : "—";
+  $("s-vb").textContent = vb;
+  const list = $("s-list");
+  list.innerHTML = "";
+  data.strokes.forEach((_, i) => {
+    list.appendChild(el("li", { html: `第 ${i + 1} 笔` }));
+  });
+  $("mode-note").textContent =
+    "这一栏的笔顺是真实教学笔顺，可以直接当范字用；甲骨字形另有自己的落笔顺序。";
+
+  writer.animateCharacter();
+  $("counter").textContent = `0 / ${data.strokes.length} 笔`;
+}
+
+/** 取本地笔顺数据。 */
+async function fetchStrokeOrder(char) {
+  try {
+    const res = await fetch(`${STROKE_ORDER_ROOT}/${encodeURIComponent(char)}.json`);
+    if (!res.ok) return null;
+    return await res.json();
+  } catch {
+    return null;
+  }
+}
+
+/* ── 本仓字形：甲骨骨架逐笔生长 ───────────────────────────── */
+
+async function loadGlyphLayer(char, layer) {
+  const idx = indexes[layer];
+  if (!idx) { $("status").textContent = "该书体未同步"; return; }
+  const file = idx[char];
+  if (!file) { $("status").textContent = `${LAYER_NAMES[layer] ?? layer}层没有「${char}」`; return; }
+  $("status").textContent = "取字形…";
+  // 切回本仓字形的渲染，藏起 hanzi-writer 的容器
+  $("hw").style.display = "none";
+  $("hw").innerHTML = "";
+  $("glyph").style.display = "block";
+  glyph = await loadGlyph(layer, file);
+  strokes = H.splitStrokes(glyph);
+  $("status").textContent = "";
+
+  const skeleton = H.isStrokeGlyph(glyph);
+  $("title").textContent = `${LAYER_NAMES[layer] ?? layer}「${char}」`;
+  $("mode-hint").textContent = skeleton ? "顺序即落笔顺序" : "墨迹轮廓：无笔顺数据";
+  $("s-count").textContent = `${strokes.length} 笔`;
+  $("s-kind").textContent = skeleton ? "描边字形（可按笔顺书写）" : "墨迹轮廓（按整笔显示）";
+  const vb = glyph.viewBox;
+  $("s-vb").textContent = `${vb.width} × ${vb.height}`;
+  const list = $("s-list");
+  list.innerHTML = "";
+  strokes.forEach((s, i) => {
+    list.appendChild(el("li", {
+      html: `第 ${i + 1} 笔　长 ${s.length.toFixed(1)}　角度 ${(s.angle * 180 / Math.PI).toFixed(0)}°`,
+    }));
+  });
+
+  $("data-note").textContent = skeleton
+    ? "甲骨字形：每一笔是一段折线，文件里的顺序就是落笔顺序——所以笔顺不用另存一份数据。"
+    : "摹本字形：每一笔是一块闭合的墨迹，里面没有起笔收笔，文件顺序只是存放顺序——" +
+      "这里按整笔显现，不要当成笔顺读。";
+
+  $("mode-note").textContent = skeleton
+    ? "逐笔生长的做法：让每一笔像被笔尖画出来一样，从头走到尾，画完一笔再画下一笔。"
+    : "摹本字形是闭合的墨迹，没有起笔和收笔，只能整笔显现。";
+  $("counter").textContent = `0 / ${strokes.length} 笔`;
+
+  renderGlyph(0);
+}
+
+/** 画出前 `shown` 笔（骨架型用虚线偏移做生长动画）。 */
+function renderGlyph(shownCount) {
+  const svg = $("glyph");
+  const vb = glyph.viewBox;
+  svg.setAttribute("viewBox", `${vb.x} ${vb.y} ${vb.width} ${vb.height}`);
+  svg.innerHTML = "";
+  glyph.paths.forEach((p, i) => {
+    const path = document.createElementNS("http://www.w3.org/2000/svg", "path");
+    path.setAttribute("d", pathData(p.subpaths));
+    if (p.filled) {
+      path.setAttribute("fill", i < shownCount ? "#1c1b18" : "transparent");
+      path.setAttribute("fill-rule", "nonzero");
+    } else {
+      path.setAttribute("fill", "none");
+      path.setAttribute("stroke", "#1c1b18");
+      path.setAttribute("stroke-width", String(p.strokeWidth));
+      path.setAttribute("stroke-linecap", "round");
+      path.setAttribute("stroke-linejoin", "round");
+    }
+    svg.appendChild(path);
+  });
+  shown = shownCount;
+  $("counter").textContent = `${shownCount} / ${strokes.length} 笔`;
+}
+
+/* ── 播放控制 ────────────────────────────────────────────── */
+
+function toggle() {
+  if ($("mode").value === "kai") {
+    if (!writer) return;
+    writer.animateCharacter();
+    return;
+  }
+  if (tl) { stopAll(); return; }
+  playGlyph();
+}
+
+/** 本仓字形的逐笔播放：骨架型用 anime.js 画「一笔从头到尾」，填充型整笔显现。 */
+function playGlyph() {
+  const svg = $("glyph");
+  const skeleton = H.isStrokeGlyph(glyph);
+  const speed = Number($("speed").value);
+  const perStroke = Math.max(120, speed);
+  const gap = skeleton ? Math.max(80, speed * 0.35) : Math.max(40, speed * 0.25);
+
+  // 先清空
+  renderGlyph(0);
+  const paths = Array.from(svg.querySelectorAll("path"));
+
+  if (!skeleton) {
+    // 摹本：没有笔顺，只能整笔淡入。**如实说明**，不假装是书写过程。
+    tl = window.Anime.createTimeline({
+      defaults: { ease: "outQuad" },
+      onComplete: () => { tl = null; },
+    });
+    paths.forEach((node, i) => {
+      tl.add(node, { opacity: [0, 1], duration: perStroke * 0.6 }, i * gap);
+    });
+    return;
+  }
+
+  // 骨架：每笔用 dashoffset 从全长走到 0 —— 一笔从头到尾
+  tl = window.Anime.createTimeline({
+    defaults: { ease: "inOutSine" },
+    onComplete: () => { tl = null; },
+  });
+  paths.forEach((node, i) => {
+    let len = 0;
+    try {
+      len = node.getTotalLength();
+    } catch {
+      len = 0;
+    }
+    if (!len || !isFinite(len)) {
+      // 算不出长度的笔画就整笔显现（不要卡住动画）
+      tl.add(node, { opacity: [0, 1], duration: perStroke * 0.5 }, i * gap);
+      return;
+    }
+    node.style.strokeDasharray = `${len} ${len}`;
+    node.style.strokeDashoffset = String(len);
+    tl.add(node, {
+      strokeDashoffset: [len, 0],
+      duration: perStroke,
+      onUpdate: () => { $("counter").textContent = `${i + 1} / ${strokes.length} 笔`; },
+    }, i * gap);
+  });
+}
+
+function reset() {
+  stopAll();
+  if ($("mode").value === "kai") {
+    if (writer) writer.hideCharacter();
+    const data = writer && writer.getCharacterData ? writer.getCharacterData() : null;
+    if (data) $("counter").textContent = `0 / ${data.strokes.length} 笔`;
+    return;
+  }
+  if (glyph) renderGlyph(0);
+}
+
+function stopAll() {
+  if (tl) {
+    try { tl.pause(); } catch { /* 忽略 */ }
+    tl = null;
+  }
+  if (writer && writer.hideCharacter) writer.hideCharacter();
+}
+
+/* ── 描红底本 ────────────────────────────────────────────── */
+
+function showTrace() {
+  if ($("mode").value === "kai") {
+    $("trace-note").textContent =
+      "楷书描红用现成的描红功能：直接在描红底本上判笔顺与形状。";
+    return;
+  }
+  const svg = $("glyph");
+  const vb = glyph.viewBox;
+  svg.setAttribute("viewBox", `${vb.x} ${vb.y} ${vb.width} ${vb.height}`);
+  svg.innerHTML = "";
+  glyph.paths.forEach((p) => {
+    const path = document.createElementNS("http://www.w3.org/2000/svg", "path");
+    path.setAttribute("d", pathData(p.subpaths));
+    if (p.filled) {
+      path.setAttribute("fill", "#eae4d6");
+      path.setAttribute("fill-rule", "nonzero");
+    } else {
+      path.setAttribute("fill", "none");
+      path.setAttribute("stroke", "#eae4d6");
+      path.setAttribute("stroke-width", String(p.strokeWidth * 1.6));
+      path.setAttribute("stroke-linecap", "round");
+      path.setAttribute("stroke-linejoin", "round");
+    }
+    svg.appendChild(path);
+  });
+  $("trace-note").textContent = "描红底本：浅色填充（或加粗的浅色描边），照着描就行。";
+}
+
+init();
+</script>
+</body>
+</html>

@@ -1,0 +1,268 @@
+<!DOCTYPE html>
+<html lang="zh-Hans">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>部首定位 · 汉字算法库</title>
+<link rel="stylesheet" href="./lib/demo.css">
+</head>
+<body>
+<header>
+  <h1>部首定位：小篆里哪几笔是这个字的部首</h1>
+  <p class="sub">
+    输入一个现代字，看它的小篆写法；<b>点字里的任意一块</b>，看它是不是这个字的部首。
+    页面会把这个字分成几块（左、右上、右下……），并告诉你哪几笔是部首、整个字是什么结构。
+  </p>
+  <nav>
+    <a href="./index.html">总览</a>
+    <a href="./index.html#radical" aria-current="page">部首定位</a>
+    <a href="./index.html#stroke">笔画动画</a>
+    <a href="./index.html#evolution">字形演变</a>
+    <a href="./index.html#lishu">隶变算法</a>
+    <a href="./index.html#vertical">竖排版式</a>
+    <a href="./index.html#lab">教学实验室</a>
+    <a href="./index.html#trace">描红练习</a>
+  </nav>
+</header>
+
+<main>
+  <div class="panel">
+    <div class="toolbar">
+      <input type="search" id="q" placeholder="输入现代字，如 投 / 明 / 想" value="投" size="10">
+      <button id="go" class="primary">定位部首</button>
+      <span id="status" class="muted"></span>
+    </div>
+    <div class="grid" id="quick"></div>
+  </div>
+
+  <div class="stage">
+    <div class="panel">
+      <h2>小篆字形<span class="hint">点任意一块</span></h2>
+      <div class="canvas"><svg id="glyph" viewBox="0 0 400 400"></svg></div>
+      <div class="legend" style="margin-top:10px">
+        <span><i style="background:#8a6d3b"></i>选中的块</span>
+        <span><i style="background:#1c1b18"></i>其余块（保持原样）</span>
+      </div>
+      <p class="note" id="block-note"></p>
+    </div>
+
+    <div class="side">
+      <div class="panel">
+        <h2>定位结果</h2>
+        <table class="kv">
+          <tr><th>现代字</th><td id="r-char">—</td></tr>
+          <tr><th>说文部</th><td id="r-radical">—</td></tr>
+          <tr><th>部首字</th><td id="r-radchar">—</td></tr>
+          <tr><th>部首笔画</th><td id="r-paths">—</td></tr>
+          <tr><th>相似程度</th><td id="r-score">—</td></tr>
+          <tr><th>精确率</th><td id="r-prec">—</td></tr>
+          <tr><th>部首占比</th><td id="r-cov">—</td></tr>
+          <tr><th>缩放</th><td id="r-scale">—</td></tr>
+          <tr><th>构形</th><td id="r-struct">—</td></tr>
+        </table>
+        <p class="note" id="r-note"></p>
+      </div>
+      <div class="panel">
+        <h2>这个字分几块</h2>
+        <table class="kv">
+          <tr><th>块数</th><td id="b-count">—</td></tr>
+          <tr><th>块的方位</th><td id="b-labels">—</td></tr>
+        </table>
+        <ol id="b-list" style="margin:10px 0 0;padding-left:1.4em;color:var(--muted);font-size:13px"></ol>
+        <p class="note">
+          分块是按字形的疏密自己切出来的：先沿最空的地方切一刀，再对切出来的每一块继续切，
+          直到切不动为止。
+        </p>
+      </div>
+      <div class="panel">
+        <h2>你点到的那一块</h2>
+        <table class="kv">
+          <tr><th>笔画序号</th><td id="c-idx">—</td></tr>
+          <tr><th>所在块</th><td id="c-block">—</td></tr>
+          <tr><th>归属</th><td id="c-role">—</td></tr>
+          <tr><th>在匹配框内</th><td id="c-inside">—</td></tr>
+        </table>
+      </div>
+    </div>
+  </div>
+</main>
+
+<script src="./lib/hanzi-algorithms.js"></script>
+<script src="./lib/demo.js"></script>
+<script>
+const H = window.HanziAlgorithms;
+const { loadGlyph, loadIndex, loadRadicalIndex, loadRadicalForms, drawGlyph, el, missingAssets } = window.HanziDemo;
+
+const $ = (id) => document.getElementById(id);
+let sealIndex = {};
+let radicalIndex = {};
+let radicalForms = {};
+let current = null;  // { glyph, match, decomposition, blocks }
+
+async function init() {
+  try {
+    [sealIndex, radicalIndex, radicalForms] = await Promise.all([
+      loadIndex("seal"),
+      loadRadicalIndex(),
+      loadRadicalForms(),
+    ]);
+  } catch {
+    missingAssets($("quick").parentElement);
+    return;
+  }
+
+  const quick = ["投", "指", "持", "控", "想", "好", "如", "河", "眼", "語", "明", "本", "水", "手", "日"];
+  for (const ch of quick) {
+    $("quick").appendChild(el("button", {
+      text: ch,
+      onclick: () => { $("q").value = ch; run(ch); },
+    }));
+  }
+
+  $("go").addEventListener("click", () => run($("q").value.trim()));
+  $("q").addEventListener("keydown", (e) => { if (e.key === "Enter") run($("q").value.trim()); });
+
+  await run($("q").value.trim());
+}
+
+async function run(char) {
+  if (!char) return;
+  $("status").textContent = "定位中…";
+  await new Promise((r) => setTimeout(r, 0));
+
+  const file = sealIndex[char];
+  if (!file) { $("status").textContent = `仓内没有「${char}」`; return; }
+  const cp = file.replace(/\.svg$/, "");
+
+  const reg = radicalIndex[cp];
+  if (!reg) { $("status").textContent = `「${char}」没有说文部登记`; return; }
+  const [radicalNo, radicalCp] = reg;
+  const radicalChar = radicalIndex[radicalCp]?.[2] ?? "—";
+
+  const [glyph, radicalGlyph] = await Promise.all([
+    loadGlyph("seal", file),
+    loadGlyph("seal", `${radicalCp}.svg`),
+  ]);
+
+  const forms = radicalForms[radicalNo];
+  // 投票优先、判不出回退模板：两条路径互补，组合的准确率最高（见 src/structure/resolve.ts）
+  const resolved = H.resolveStructure(glyph, radicalGlyph, {
+    radicalTypes: forms?.types ?? [],
+  });
+
+  // 分块：把整字切成「块」（左 / 右上 / 右下 …），点哪一块就整块亮
+  const blocks = H.segmentBlocks(glyph);
+  current = { glyph, match: resolved?.match ?? null, decomposition: resolved?.decomposition ?? null, blocks };
+
+  $("b-count").textContent = `${blocks.length} 块`;
+  $("b-labels").textContent = blocks.map((b) => b.label).join("、");
+  const list = $("b-list");
+  list.innerHTML = "";
+  for (const b of blocks) {
+    const isRadical = resolved && b.pathIndices.some((i) => resolved.match.pathIndices.includes(i));
+    list.appendChild(el("li", {
+      html: `<b>${b.label}</b>　第 ${b.pathIndices.map((i) => i + 1).join("、")} 笔` +
+        (isRadical ? "　<span style='color:#8a6d3b'>← 部首</span>" : ""),
+    }));
+  }
+  $("block-note").textContent = blocks.length > 1
+    ? `「${char}」分成 ${blocks.length} 块：${blocks.map((b) => b.label).join("、")}。点任意一块，那一块整块亮起来，其余保持原样。`
+    : `「${char}」只有一块——分不出更细的部件。`;
+
+  if (!resolved) {
+    $("status").textContent = "置信度不足，不敢下结论";
+    drawBlocks(null);
+    for (const id of ["r-char","r-radical","r-radchar","r-paths","r-score","r-prec","r-cov","r-scale","r-struct"]) {
+      $(id).textContent = "—";
+    }
+    $("r-note").textContent = "部首说不准时，这里就留空不给答案——这是有意的：宁可不说，也不乱说。";
+    bindClicks();
+    return;
+  }
+
+  const match = resolved.match;
+  const decomposition = resolved.decomposition;
+  drawBlocks(new Set(match.pathIndices));
+  $("status").textContent = "";
+  $("r-char").textContent = `${char}（篆书 ${cp}）`;
+  $("r-radical").textContent = `第 ${radicalNo} 部`;
+  $("r-radchar").textContent = radicalChar ?? "—";
+  $("r-paths").textContent = match.pathIndices.map((i) => `第 ${i + 1} 笔`).join("、");
+  $("r-score").textContent = match.score.toFixed(3);
+  $("r-prec").textContent = match.precision.toFixed(3);
+  $("r-cov").textContent = `${(match.coverage * 100).toFixed(1)}%`;
+  $("r-scale").textContent = `横向 ×${match.fx.toFixed(2)}　纵向 ×${match.fy.toFixed(2)}`;
+  $("r-struct").textContent = `${decomposition.structure}　${decomposition.meaning}`;
+  $("r-note").textContent = resolved.method === "vote"
+    ? "这里是用这个部首在合体字里常见的写法去比笔画形状，比拿它单独的写法更准。"
+    : (match.pathIndices.length
+      ? "横向被压扁，说明这个部首作偏旁时被纵向拉长了——篆书的偏旁就是这个写法。"
+      : "部首单独成字时和放在合体字里写法不完全一样，把握不大。");
+
+  bindClicks();
+}
+
+/**
+ * 按「块」高亮。
+ *
+ * 选中的块整块染成橙色，**其余块保持原样**——
+ * 早先的实现把其余笔画打成 22% 的淡灰，点一下满屏发灰，
+ * 反而看不出这是个「几 + 又」的结构。
+ */
+function drawBlocks(highlightPaths) {
+  const svg = $("glyph");
+  const glyph = current.glyph;
+  const vb = glyph.viewBox;
+  svg.setAttribute("viewBox", vb.x + " " + vb.y + " " + vb.width + " " + vb.height);
+  svg.innerHTML = "";
+  glyph.paths.forEach((p, i) => {
+    const path = document.createElementNS("http://www.w3.org/2000/svg", "path");
+    path.setAttribute("d", window.HanziDemo.pathData(p.subpaths));
+    const on = highlightPaths && highlightPaths.has(i);
+    if (p.filled) {
+      path.setAttribute("fill", on ? "#8a6d3b" : "#1c1b18");
+      path.setAttribute("fill-rule", "nonzero");
+    } else {
+      path.setAttribute("fill", "none");
+      path.setAttribute("stroke", on ? "#8a6d3b" : "#1c1b18");
+      path.setAttribute("stroke-width", String(p.strokeWidth));
+      path.setAttribute("stroke-linecap", "round");
+      path.setAttribute("stroke-linejoin", "round");
+    }
+    path.dataset.pathIndex = String(i);
+    svg.appendChild(path);
+  });
+}
+
+function bindClicks() {
+  const svg = $("glyph");
+  svg.querySelectorAll("path").forEach((node) => {
+    node.style.cursor = "pointer";
+    node.addEventListener("click", () => {
+      const idx = Number(node.dataset.pathIndex);
+      const m = current?.match;
+      const blocks = current?.blocks ?? [];
+      // 找到这一笔属于哪一块，整块高亮
+      const block = blocks.find((b) => b.pathIndices.includes(idx));
+      const paths = block ? new Set(block.pathIndices) : new Set([idx]);
+
+      $("c-idx").textContent = `第 ${idx} 笔（共 ${current.glyph.paths.length} 笔）`;
+      $("c-block").textContent = block ? block.label : "—";
+      if (!m) {
+        $("c-role").textContent = "—";
+        $("c-inside").textContent = "—";
+      } else {
+        const info = m.perPath.find((p) => p.index === idx);
+        const isRadical = m.pathIndices.includes(idx);
+        $("c-role").textContent = isRadical ? "属于部首" : "属于其余部分";
+        $("c-inside").textContent = info ? `${(info.inside * 100).toFixed(1)}%` : "—";
+      }
+      drawBlocks(paths);
+    });
+  });
+}
+
+init();
+</script>
+</body>
+</html>

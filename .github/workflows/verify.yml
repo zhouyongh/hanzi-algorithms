@@ -1,0 +1,54 @@
+name: Verify
+
+# 这个仓库的价值全在算法上，所以 CI 只干一件事：**证明算法还是好的**。
+#
+# 为什么不用 CI 去跑端到端用例：端到端用例要真实字形（本地 assets/，不入库），
+# 公开仓库里跑不了。所以 CI 跑的是不依赖字形的那些用例；带字形的端到端用例在
+# 本地有 assets/ 时自动启用（见 tests/*.e2e.test.ts 的 skipIf）。
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          # 必须是 22.18+：`tools/**` 按「Node 原生跑 TS」写（相对导入带 .ts），
+          # Node 20 跑 `node tools/build_bundle.ts` 会报 ERR_UNKNOWN_FILE_EXTENSION。
+          # 首次 CI 实测挂在 Node 20 上，所以这里跟本机（24）对齐。
+          node-version: "24"
+          cache: npm
+
+      - name: 安装依赖
+        run: npm ci
+
+      - name: 类型检查
+        run: npm run typecheck
+
+      - name: 类型检查（含 tools/ 与 tests/）
+        # tsconfig.json 只管 src/。tools/ 与 tests/ 同样跑在 Node 上，
+        # 却不在这份 tsconfig 里——曾经因此漏掉过 decompose() 变可空后的空值崩溃。
+        run: npm run typecheck:all
+
+      - name: 单元测试
+        run: npm test
+
+      - name: 构建
+        run: npm run build
+
+      - name: 演示打包产物与源码一致
+        # 演示页引用的是打包产物 demos/lib/hanzi-algorithms.js，它入库。
+        # 如果它和 src/ 对不上，演示页展示的算法就与库里不一样——必须挡住。
+        run: |
+          node tools/build_bundle.ts
+          if ! git diff --quiet -- demos/lib/hanzi-algorithms.js; then
+            echo "::error::演示打包产物与 src/ 不一致，请跑 node tools/build_bundle.ts 后提交"
+            git --no-pager diff --stat -- demos/lib/hanzi-algorithms.js
+            exit 1
+          fi

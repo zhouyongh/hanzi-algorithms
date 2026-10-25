@@ -1,0 +1,352 @@
+<!DOCTYPE html>
+<html lang="zh-Hans">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>汉字教学实验室 · 汉字算法库</title>
+<link rel="stylesheet" href="./lib/demo.css">
+<style>
+  .lab { display: grid; grid-template-columns: 168px minmax(300px, 1fr) minmax(250px, 330px); gap: 12px; align-items: start; }
+  @media (max-width: 1000px) { .lab { grid-template-columns: 1fr; } }
+  .charlist { max-height: 560px; overflow: auto; }
+  .tabs { display: flex; gap: 4px; border-bottom: 1px solid var(--line); margin-bottom: 10px; flex-wrap: wrap; }
+  .tabs button { border: 0; border-bottom: 2px solid transparent; border-radius: 0; padding: 7px 11px; color: var(--muted); }
+  .tabs button[aria-selected="true"] { color: var(--fg); border-bottom-color: var(--accent); font-weight: 600; }
+  .big { min-height: 420px; }
+</style>
+</head>
+<body>
+<header>
+  <h1>汉字教学实验室</h1>
+  <p class="sub">
+    左边选字，中间是大画布，右边换着看这个字的不同角度：部首在哪、笔画怎么分、字怎么演变、
+    隶书怎么变、竖排怎么排。右下角还能让两个字比一比，看它们差在哪一笔。
+  </p>
+  <nav>
+    <a href="./index.html">总览</a>
+    <a href="./index.html#radical">部首定位</a>
+    <a href="./index.html#stroke">笔画动画</a>
+    <a href="./index.html#evolution">字形演变</a>
+    <a href="./index.html#lishu">隶变算法</a>
+    <a href="./index.html#vertical">竖排版式</a>
+    <a href="./index.html#lab" aria-current="page">教学实验室</a>
+    <a href="./index.html#trace">描红练习</a>
+  </nav>
+</header>
+
+<main>
+  <div class="lab">
+    <div class="panel charlist">
+      <h2>字表<span class="hint">说文 540 部</span></h2>
+      <input type="search" id="filter" placeholder="筛字" style="width:100%">
+      <div id="list" style="margin-top:8px"></div>
+    </div>
+
+    <div class="panel">
+      <div class="tabs" id="tabs">
+        <button data-tab="radical" aria-selected="true">部首</button>
+        <button data-tab="stroke">笔画</button>
+        <button data-tab="evolve">演变</button>
+        <button data-tab="lishu">隶变</button>
+        <button data-tab="layout">版式</button>
+      </div>
+      <div class="canvas big"><svg id="glyph" viewBox="0 0 400 400"></svg></div>
+      <div class="toolbar" style="margin-top:12px">
+        <label id="ctl-label">—</label>
+        <input type="range" id="ctl" min="0" max="100" value="0" style="flex:1">
+        <span class="muted" id="ctlv"></span>
+        <button id="play" class="primary">▶</button>
+      </div>
+    </div>
+
+    <div class="side">
+      <div class="panel">
+        <h2>当前字</h2>
+        <table class="kv">
+          <tr><th>现代字</th><td id="r-char">—</td></tr>
+          <tr><th>篆书编号</th><td id="r-cp">—</td></tr>
+          <tr><th>说文部</th><td id="r-rad">—</td></tr>
+          <tr><th>笔画数</th><td id="r-strokes">—</td></tr>
+        </table>
+      </div>
+      <div class="panel">
+        <h2>算法输出</h2>
+        <table class="kv">
+          <tr><th>结构</th><td id="o-struct">—</td></tr>
+          <tr><th>部首笔画</th><td id="o-paths">—</td></tr>
+          <tr><th>相关度</th><td id="o-score">—</td></tr>
+          <tr><th>形声</th><td id="o-phonetic">—</td></tr>
+          <tr><th>演变链</th><td id="o-chain">—</td></tr>
+          <tr><th>对应数</th><td id="o-corr">—</td></tr>
+        </table>
+        <p class="note" id="o-note"></p>
+      </div>
+      <div class="panel">
+        <h2>易混字对比<span class="hint">差在哪一笔</span></h2>
+        <div class="row">
+          <input type="text" id="cmp-a" value="未" size="4">
+          <input type="text" id="cmp-b" value="末" size="4">
+          <button id="cmp-go">对比</button>
+        </div>
+        <table class="kv" style="margin-top:8px">
+          <tr><th>形似度</th><td id="c-sim">—</td></tr>
+          <tr><th>共有笔画</th><td id="c-pairs">—</td></tr>
+          <tr><th>差异</th><td id="c-diff">—</td></tr>
+        </table>
+        <p class="note" id="c-note"></p>
+      </div>
+    </div>
+  </div>
+</main>
+
+<script src="./lib/hanzi-algorithms.js"></script>
+<script src="./lib/demo.js"></script>
+<script>
+const H = window.HanziAlgorithms;
+const { loadGlyph, loadIndex, loadRadicalIndex, loadRadicalForms, el, missingAssets, pathData } = window.HanziDemo;
+
+const $ = (id) => document.getElementById(id);
+const LAYERS = ["oracle", "bronze", "seal", "clerical"];
+const LAYER_NAMES = { oracle: "甲骨", bronze: "金文", seal: "篆", clerical: "隶" };
+
+let sealIndex = {};
+let radicalIndex = {};
+let radicalForms = {};
+let indexes = {};
+let current = null;
+let tab = "radical";
+let timer = null;
+
+async function init() {
+  // 并行取全部索引（篆书字表 + 部首登记 + 各书体字表）
+  const [seal, radicals, forms, ...rest] = await Promise.all([
+    loadIndex("seal").catch(() => null),
+    loadRadicalIndex().catch(() => null),
+    loadRadicalForms().catch(() => ({})),
+    ...LAYERS.map((layer) => loadIndex(layer).catch(() => null)),
+  ]);
+  sealIndex = seal || {};
+  radicalIndex = radicals || {};
+  radicalForms = forms || {};
+  LAYERS.forEach((layer, i) => { if (rest[i]) indexes[layer] = rest[i]; });
+  if (Object.keys(sealIndex).length === 0) {
+    missingAssets($("list").parentElement);
+    return;
+  }
+  buildList();
+  $("filter").addEventListener("input", buildList);
+  $("tabs").addEventListener("click", (e) => {
+    const btn = e.target.closest("button[data-tab]");
+    if (!btn) return;
+    tab = btn.dataset.tab;
+    $("tabs").querySelectorAll("button").forEach((b) => b.setAttribute("aria-selected", String(b === btn)));
+    setupCtl();
+    render();
+  });
+  $("ctl").addEventListener("input", render);
+  $("play").addEventListener("click", toggle);
+  $("cmp-go").addEventListener("click", comparePair);
+  await select("明");
+  await comparePair();
+}
+
+/** 方位的中文说法。 */
+function sideText(side) {
+  return { left: "左", right: "右", top: "上", bottom: "下", enclosing: "外围", whole: "整体" }[side] ?? side;
+}
+
+/** 易混字对比：两个字差在哪一笔。 */
+async function comparePair() {
+  const a = $("cmp-a").value.trim();
+  const b = $("cmp-b").value.trim();
+  if (!a || !b) return;
+  const fa = sealIndex[a];
+  const fb = sealIndex[b];
+  if (!fa || !fb) {
+    $("c-note").textContent = "两个字都要在篆书层里存在。";
+    return;
+  }
+  const [ga, gb] = await Promise.all([loadGlyph("seal", fa), loadGlyph("seal", fb)]);
+  const d = H.compareGlyphs(ga, gb);
+  $("c-sim").textContent = `${(d.similarity * 100).toFixed(1)}%`;
+  $("c-pairs").textContent = `${d.pairs.length} 笔`;
+  $("c-diff").textContent = d.onlyA.length || d.onlyB.length
+    ? `${a} 多 ${d.onlyA.length} 笔，${b} 多 ${d.onlyB.length} 笔`
+    : "笔画一一对应";
+  $("c-note").textContent = d.summary;
+}
+
+function buildList() {
+  const q = $("filter").value.trim();
+  const box = $("list");
+  box.innerHTML = "";
+  let shown = 0;
+  for (const ch of Object.keys(sealIndex)) {
+    if (q && !ch.includes(q)) continue;
+    box.appendChild(el("button", {
+      class: "btn",
+      text: ch,
+      style: "width:100%;margin:0 0 3px;padding:4px 6px;text-align:left;font-size:15px",
+      onclick: () => select(ch),
+    }));
+    shown += 1;
+    if (shown > 300) break;
+  }
+}
+
+async function select(char) {
+  const file = sealIndex[char];
+  if (!file) return;
+  const cp = file.replace(/\.svg$/, "");
+  const reg = radicalIndex[cp];
+
+  const [glyph, radicalGlyph] = await Promise.all([
+    loadGlyph("seal", file),
+    reg ? loadGlyph("seal", `${reg[1]}.svg`) : null,
+  ]);
+
+  // 演变链：**串行**取各书体字形。
+  // 并发取多个字形在有些浏览器环境里会让响应迟迟不落地（请求发出去了、
+  // 服务器也响应了，但前端的 promise 永不 settle）。串行只慢一点点，稳。
+  const chain = [];
+  for (const layer of LAYERS) {
+    const f = indexes[layer]?.[char];
+    if (!f) continue;
+    const g = await loadGlyph(layer, f);
+    if (g) chain.push({ layer, glyph: g });
+  }
+
+  // 投票优先、判不出回退模板：两条路径互补，组合的准确率最高
+  const forms = reg ? radicalForms[reg[0]] : null;
+  const resolved = H.resolveStructure(glyph, radicalGlyph, {
+    radicalTypes: forms?.types ?? [],
+  });
+  const match = resolved ? resolved.match : null;
+  const decomposition = resolved ? resolved.decomposition : null;
+  let corr = null;
+  if (chain.length >= 2) corr = H.correspondStrokes(chain[0].glyph, chain[chain.length - 1].glyph);
+
+  // 形声分析
+  const phonetic = decomposition
+    ? H.analyzePhonetic(decomposition, match, { radicalChar: reg ? radicalIndex[reg[1]]?.[2] : "" })
+    : null;
+
+  current = { char, cp, reg, glyph, radicalGlyph, match, decomposition, chain, corr, phonetic };
+
+  $("r-char").textContent = char;
+  $("r-cp").textContent = cp;
+  $("r-rad").textContent = reg ? `第 ${reg[0]} 部（${radicalIndex[reg[1]]?.[2] ?? "?"}）` : "—";
+  $("r-strokes").textContent = `${glyph.paths.length}`;
+  $("o-struct").textContent = decomposition ? `${decomposition.structure} ${decomposition.meaning}` : "—";
+  $("o-paths").textContent = match ? match.pathIndices.map((i) => i).join("、") : "—";
+  $("o-score").textContent = match ? match.score.toFixed(3) : "—";
+  $("o-phonetic").textContent = phonetic
+    ? (phonetic.isPhonoSemantic
+      ? `形符在${sideText(phonetic.semantic.side)}，声符在${sideText(phonetic.phonetic.side)}（${phonetic.confidence.toFixed(2)}）`
+      : "非形声结构")
+    : "—";
+  $("o-chain").textContent = chain.length ? chain.map((c) => LAYER_NAMES[c.layer]).join(" → ") : "—";
+  $("o-corr").textContent = corr ? `${corr.pairs.length} 组` : "—";
+  $("o-note").textContent = match
+    ? "部首和结构都是算出来的：部首拿现成的小篆来比，结构则看字的左右上下关系。"
+    : "这个字没有查到部首记录，或者把握不大，算法就不硬给答案。";
+
+  setupCtl();
+  render();
+}
+
+function setupCtl() {
+  const labels = { radical: "部首置信度", stroke: "显示到第几笔", evolve: "演变进度", lishu: "方折程度", layout: "每行字数" };
+  $("ctl-label").textContent = labels[tab] ?? "—";
+  $("ctl").min = tab === "layout" ? "5" : "0";
+  $("ctl").max = tab === "stroke" ? String(Math.max(1, current?.glyph.paths.length ?? 1) - 1)
+    : tab === "layout" ? "24" : "100";
+  $("ctl").value = tab === "stroke" ? String(Math.max(0, (current?.glyph.paths.length ?? 1) - 1)) : "0";
+  $("ctlv").textContent = $("ctl").value;
+}
+
+function paintPaths(svg, glyph, highlight) {
+  const vb = glyph.viewBox;
+  svg.setAttribute("viewBox", `${vb.x} ${vb.y} ${vb.width} ${vb.height}`);
+  svg.innerHTML = "";
+  glyph.paths.forEach((p, i) => {
+    const path = document.createElementNS("http://www.w3.org/2000/svg", "path");
+    path.setAttribute("d", pathData(p.subpaths));
+    if (p.filled) {
+      path.setAttribute("fill", highlight && highlight.has(i) ? "#8a6d3b" : "#1c1b18");
+      path.setAttribute("fill-rule", "nonzero");
+    } else {
+      path.setAttribute("fill", "none");
+      path.setAttribute("stroke", highlight && highlight.has(i) ? "#8a6d3b" : "#1c1b18");
+      path.setAttribute("stroke-width", String(p.strokeWidth));
+      path.setAttribute("stroke-linecap", "round");
+      path.setAttribute("stroke-linejoin", "round");
+    }
+    svg.appendChild(path);
+  });
+}
+
+function render() {
+  if (!current) return;
+  const svg = $("glyph");
+  const v = Number($("ctl").value);
+  $("ctlv").textContent = String(v);
+
+  if (tab === "radical") {
+    const hl = current.match && v / 100 >= current.match.score
+      ? new Set(current.match.pathIndices) : null;
+    paintPaths(svg, current.glyph, hl);
+  } else if (tab === "stroke") {
+    const n = v + 1;
+    paintPaths(svg, current.glyph, new Set(Array.from({ length: n }, (_, i) => i)));
+  } else if (tab === "evolve") {
+    if (current.chain.length < 2) { svg.innerHTML = ""; return; }
+    const g = H.interpolateGlyphs(current.chain[0].glyph, current.chain[current.chain.length - 1].glyph, v / 100, { samples: 96 });
+    const vb = g.viewBox;
+    svg.setAttribute("viewBox", `${vb.x} ${vb.y} ${vb.width} ${vb.height}`);
+    svg.innerHTML = "";
+    for (const p of g.paths) {
+      const path = document.createElementNS("http://www.w3.org/2000/svg", "path");
+      path.setAttribute("d", pathData(p.subpaths));
+      path.setAttribute("fill", "#1c1b18");
+      path.setAttribute("fill-rule", "nonzero");
+      svg.appendChild(path);
+    }
+  } else if (tab === "lishu") {
+    const out = H.lishuTransform(current.glyph, { simplifyTolerance: (v / 100) * 30 });
+    paintPaths(svg, out, null);
+  } else if (tab === "layout") {
+    const text = "日月盈昃，辰宿列张。";
+    const cells = H.layoutVertical(text, { charSize: 40, charGap: 2, lineGap: 14, rowsPerColumn: v });
+    const extent = H.verticalExtent(cells, { charSize: 40, charGap: 2, lineGap: 14 });
+    svg.setAttribute("viewBox", `0 0 ${Math.max(1, extent.width)} ${Math.max(1, extent.height)}`);
+    svg.innerHTML = "";
+    for (const c of cells) {
+      const t = document.createElementNS("http://www.w3.org/2000/svg", "text");
+      t.setAttribute("x", String(c.x + 20));
+      t.setAttribute("y", String(c.y + 26));
+      t.setAttribute("font-size", "34");
+      t.setAttribute("text-anchor", "middle");
+      t.setAttribute("fill", "#1c1b18");
+      t.textContent = c.char;
+      svg.appendChild(t);
+    }
+  }
+}
+
+function toggle() {
+  if (timer) { clearTimeout(timer); timer = null; return; }
+  const step = () => {
+    let v = Number($("ctl").value) + 2;
+    if (v > Number($("ctl").max)) v = Number($("ctl").min);
+    $("ctl").value = String(v);
+    render();
+    timer = setTimeout(step, 50);
+  };
+  timer = setTimeout(step, 50);
+}
+
+init();
+</script>
+</body>
+</html>

@@ -1,0 +1,218 @@
+<!DOCTYPE html>
+<html lang="zh-Hans">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>隶变算法 · 汉字算法库</title>
+<link rel="stylesheet" href="./lib/demo.css">
+</head>
+<body>
+<header>
+  <h1>隶变算法：把篆书改成隶书的样子</h1>
+  <p class="sub">
+    篆书变隶书有四条老规矩：圆转方折、收笔上扬、横平竖直、越来越不像原来的图画。
+    这里每条规矩都能自己调着看。
+    <b class="muted">中间那栏是按规矩算出来的隶变示意，不是隶书摹本；右边那栏才是真实的隶书摹本。</b>
+  </p>
+  <nav>
+    <a href="./index.html">总览</a>
+    <a href="./index.html#radical">部首定位</a>
+    <a href="./index.html#stroke">笔画动画</a>
+    <a href="./index.html#evolution">字形演变</a>
+    <a href="./index.html#lishu" aria-current="page">隶变算法</a>
+    <a href="./index.html#vertical">竖排版式</a>
+    <a href="./index.html#lab">教学实验室</a>
+    <a href="./index.html#trace">描红练习</a>
+  </nav>
+</header>
+
+<main>
+  <div class="panel">
+    <div class="toolbar">
+      <input type="search" id="q" placeholder="现代字" value="明" size="8">
+      <button id="go" class="primary">载入</button>
+      <span class="muted" id="status"></span>
+    </div>
+    <div class="grid" id="quick"></div>
+  </div>
+
+  <div class="stage">
+    <div class="panel">
+      <h2>篆书 → 隶变<span class="hint">调参数看规则怎么起作用</span></h2>
+
+      <div class="triple">
+        <figure>
+          <svg id="before" viewBox="0 0 400 400"></svg>
+          <figcaption>原<span class="muted">（篆书摹本）</span></figcaption>
+        </figure>
+        <figure>
+          <svg id="after" viewBox="0 0 400 400"></svg>
+          <figcaption>算法隶变<span class="muted">（算法生成）</span></figcaption>
+        </figure>
+        <figure>
+          <svg id="real" viewBox="0 0 400 400"></svg>
+          <figcaption>真实隶书<span class="muted">（摹本对照）</span></figcaption>
+        </figure>
+      </div>
+
+      <div class="toolbar" style="margin-top:12px">
+        <label>方折程度</label>
+        <input type="range" id="tol" min="0" max="15" value="3" style="flex:1">
+        <span class="muted" id="tolv">3</span>
+      </div>
+      <div class="toolbar">
+        <label>波磔幅度</label>
+        <input type="range" id="wave" min="0" max="80" value="25" style="flex:1">
+        <span class="muted" id="wavev">2.5%</span>
+      </div>
+      <div class="toolbar">
+        <label><input type="checkbox" id="waveOn" checked> 加波磔</label>
+        <label><input type="checkbox" id="levelOn" checked> 横平竖直</label>
+        <label><input type="checkbox" id="snapOn" checked> 轴向吸附</label>
+      </div>
+    </div>
+
+    <div class="side">
+      <div class="panel">
+        <h2>四条规则</h2>
+        <table class="kv">
+          <tr><th>圆转方折</th><td>曲线折成折角（简化 + 轴向吸附）</td></tr>
+          <tr><th>线条波磔</th><td>横向收笔上扬成波</td></tr>
+          <tr><th>横平竖直</th><td>笔画主方向旋到最近的轴</td></tr>
+          <tr><th>象形性降低</th><td>曲线趋平直、构件趋简约</td></tr>
+        </table>
+        <p class="note">
+          摹本的一笔是一块闭合的墨迹，没法直接在墨迹上动规矩。所以先找出这一笔的运笔中线（笔势线），
+          规矩都加在中线上，再按原来的笔宽把墨迹撑回去。收笔的上扬也是中线上的变化，
+          不是墨迹边上凭空长出个尖。
+        </p>
+      </div>
+      <div class="panel">
+        <h2>处理结果</h2>
+        <table class="kv">
+          <tr><th>原笔画数</th><td id="r-from">—</td></tr>
+          <tr><th>变前轮廓点数</th><td id="r-frompts">—</td></tr>
+          <tr><th>变后轮廓点数</th><td id="r-topts">—</td></tr>
+          <tr><th>简化比例</th><td id="r-rate">—</td></tr>
+          <tr><th>真实隶书</th><td id="r-real">—</td></tr>
+        </table>
+        <p class="note warn">
+          中间那栏是按规矩算出来的，右边那栏是摹本。这里只按几何规矩改形状、不学史料——
+          差得远的地方，正是这些规矩本身不够用的地方。
+        </p>
+      </div>
+    </div>
+  </div>
+</main>
+
+<script src="./lib/hanzi-algorithms.js"></script>
+<script src="./lib/demo.js"></script>
+<script>
+const H = window.HanziAlgorithms;
+const { loadGlyph, loadIndex, missingAssets, pathData, el } = window.HanziDemo;
+
+const $ = (id) => document.getElementById(id);
+let sealIndex = {};
+let clericalIndex = null;
+let glyph = null;
+let realGlyph = null;
+
+function paint(svg, g) {
+  const vb = g.viewBox;
+  svg.setAttribute("viewBox", `${vb.x} ${vb.y} ${vb.width} ${vb.height}`);
+  svg.innerHTML = "";
+  for (const p of g.paths) {
+    const path = document.createElementNS("http://www.w3.org/2000/svg", "path");
+    path.setAttribute("d", pathData(p.subpaths));
+    path.setAttribute("fill", "#1c1b18");
+    path.setAttribute("fill-rule", "nonzero");
+    svg.appendChild(path);
+  }
+}
+
+async function init() {
+  try {
+    sealIndex = await loadIndex("seal");
+  } catch {
+    missingAssets($("status").parentElement);
+    return;
+  }
+  // 真实隶书只是**对照**，取不到也不影响演示
+  try {
+    clericalIndex = await loadIndex("clerical");
+  } catch {
+    clericalIndex = null;
+  }
+
+  for (const ch of ["明", "日", "月", "山", "水", "木", "人", "大", "口", "目"]) {
+    $("quick").appendChild(el("button", { text: ch, onclick: () => { $("q").value = ch; load(ch); } }));
+  }
+
+  $("go").addEventListener("click", () => load($("q").value.trim()));
+  $("q").addEventListener("keydown", (e) => { if (e.key === "Enter") load($("q").value.trim()); });
+  for (const id of ["tol", "wave"]) {
+    $(id).addEventListener("input", () => {
+      if (id === "wave") $("wavev").textContent = `${(Number($("wave").value) / 10).toFixed(1)}%`;
+      else $("tolv").textContent = $(id).value;
+      apply();
+    });
+  }
+  for (const id of ["waveOn", "levelOn", "snapOn"]) $(id).addEventListener("change", apply);
+  await load($("q").value.trim());
+}
+
+async function load(char) {
+  const file = sealIndex[char];
+  if (!file) { $("status").textContent = `仓内没有「${char}」`; return; }
+  glyph = await loadGlyph("seal", file);
+
+  realGlyph = null;
+  const rf = clericalIndex && clericalIndex[char];
+  if (rf) {
+    try {
+      realGlyph = await loadGlyph("clerical", rf);
+    } catch {
+      realGlyph = null;
+    }
+  }
+  $("r-real").textContent = realGlyph ? `${realGlyph.paths.length} 笔（已载入）` : "本机未同步隶书层";
+  $("status").textContent = "";
+  apply();
+}
+
+function apply() {
+  if (!glyph) return;
+  const tol = Number($("tol").value);
+  const waveRatio = Number($("wave").value) / 1000;   // 滑杆是千分比：25 → 2.5%
+  const waveOn = $("waveOn").checked;
+  const levelOn = $("levelOn").checked;
+  const snapOn = $("snapOn").checked;
+
+  const opts = {
+    simplifyTolerance: tol,
+    waveTail: waveOn,
+    // 比例而不是绝对值：隶书的波磔与字的大小无关
+    waveRatio: waveRatio,
+    waveAmplitude: 0,
+    levelAndStraight: levelOn,
+    axisSnapAngle: snapOn ? (20 * Math.PI) / 180 : 0,
+  };
+  const out = H.lishuTransform(glyph, opts);
+  paint($("before"), glyph);
+  paint($("after"), out);
+  if (realGlyph) paint($("real"), realGlyph);
+  else $("real").innerHTML = "";
+
+  const countPts = (g) => g.paths.reduce((s, p) => s + p.subpaths.reduce((t, sp) => t + sp.length, 0), 0);
+  const a = countPts(glyph);
+  const b = countPts(out);
+  $("r-from").textContent = `${glyph.paths.length}`;
+  $("r-frompts").textContent = `${a}`;
+  $("r-topts").textContent = `${b}`;
+  $("r-rate").textContent = a > 0 ? `${((1 - b / a) * 100).toFixed(1)}%` : "—";
+}
+
+init();
+</script>
+</body>
+</html>

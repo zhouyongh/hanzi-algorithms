@@ -1,0 +1,277 @@
+<!DOCTYPE html>
+<html lang="zh-Hans">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>汉字算法库 · 浏览</title>
+<link rel="stylesheet" href="./lib/demo.css">
+</head>
+<body>
+<header>
+  <h1>汉字算法库</h1>
+  <p class="sub">
+    把一个字形拆开来看的一组小工具：部首在哪、笔画怎么分、字怎么演变、版面怎么排、描红能得几分。
+    上面每个标签页就是一个演示，点开就能玩。
+    字形来自兄弟仓库 <span class="mono">hanzi-glyphs-svg</span>，同步到本地之后页面才有内容。
+  </p>
+</header>
+
+<nav id="tabs" role="tablist" aria-label="算法"></nav>
+
+<main id="panels"></main>
+
+<script src="./lib/hanzi-algorithms.js"></script>
+<script>
+/**
+ * 单页 Tab 浏览页。
+ *
+ * 每个算法一个 Tab，内容是那个算法的演示页（用 iframe 内嵌）。
+ *
+ * 为什么用 iframe 而不是把七个演示页合并成一个文档：
+ * - 七个演示页各自独立、都已跑通，合并要动一百多个 id，回归风险高；
+ * - iframe 里每个算法拿到**完整的一页**（自己的标题、说明、工具条），
+ *   挨个看效果时上下文完整，不像嵌在别人的页面里；
+ * - iframe 首次激活才加载，之后切回来是秒切，不用重新取一遍数据。
+ *
+ * 页内导航在嵌入模式下自动隐藏（`body.embed`，见 lib/demo.js），
+ * 所以外面这排 Tab 就是唯一的导航。
+ */
+(function () {
+  "use strict";
+
+  /**
+   * 每个 Tab 的说明：一句话讲清「这一页能看什么、能玩什么」。
+   *
+   * 算法代号（A1/A2/C1…）不在这里显示——总览是给想看效果的人看的，
+   * 代号与演示页的对应关系记在 AGENTS.md 的「算法索引」表里。
+   */
+  var TABS = [
+    { id: "overview", title: "总览", algo: "" },
+    {
+      id: "radical", title: "部首定位", algo: "",
+      src: "./01-radical.html",
+      desc: "点一个字里的任意一块，看它是不是这个字的部首；页面会列出这个字分几块、各块在哪。",
+    },
+    {
+      id: "stroke", title: "笔画动画", algo: "",
+      src: "./02-stroke.html",
+      desc: "看楷书按教学笔顺一笔一笔写出来，也看甲骨、篆书、金文、隶书的字形逐笔显现，还能生成描红底本。",
+    },
+    {
+      id: "evolution", title: "字形演变", algo: "",
+      src: "./03-evolution.html",
+      desc: "并排看源字形、中间形和目标字形，拖滑块看连续变化，分辨哪些笔画变了、消失了、是新长出来的。",
+    },
+    {
+      id: "lishu", title: "隶变算法", algo: "",
+      src: "./04-lishu.html",
+      desc: "把篆书按隶书的四条老规矩改一改：中间是按规矩算出来的隶变示意，右边是真实的隶书摹本。",
+    },
+    {
+      id: "vertical", title: "竖排版式", algo: "",
+      src: "./05-vertical.html",
+      desc: "把自己的文字排成古籍的样子：调列数与每列字数，看句读怎么挂在字的右上角，还能展开成一整叶。",
+    },
+    {
+      id: "lab", title: "教学实验室", algo: "",
+      src: "./06-lab.html",
+      desc: "同一个字换几种角度看：部首在哪、笔画怎么分、怎么演变、怎么排；还能让两个字比一比差在哪一笔。",
+    },
+    {
+      id: "trace", title: "描红练习", algo: "",
+      src: "./07-trace.html",
+      desc: "在浅色底本上描一遍，提交后看整体像不像、哪一笔最不像，还能逐笔看每一笔的得分。",
+    },
+  ];
+
+  var tabsEl = document.getElementById("tabs");
+  var panelsEl = document.getElementById("panels");
+  var byId = {};
+  TABS.forEach(function (t) { byId[t.id] = t; });
+
+  /** 每个 Tab 对应的面板元素与（算法页的）iframe。 */
+  var built = {};
+
+  function el(tag, attrs, children) {
+    var n = document.createElement(tag);
+    if (attrs) {
+      Object.keys(attrs).forEach(function (k) {
+        if (k === "class") n.className = attrs[k];
+        else if (k === "html") n.innerHTML = attrs[k];
+        else if (k === "text") n.textContent = attrs[k];
+        else n.setAttribute(k, attrs[k]);
+      });
+    }
+    (children || []).forEach(function (c) { n.appendChild(c); });
+    return n;
+  }
+
+  // ── 面板骨架 ──────────────────────────────────────────────
+  TABS.forEach(function (t) {
+    var panel = el("section", {
+      class: "tabpanel", id: "panel-" + t.id, role: "tabpanel",
+      "aria-labelledby": "tab-" + t.id,
+    });
+    panelsEl.appendChild(panel);
+    built[t.id] = { panel: panel, frame: null };
+  });
+
+  // ── 总览面板（就是原来那张算法清单）──────────────────────
+  built.overview.panel.appendChild(el("div", { class: "panel" }, [
+    el("h2", { html: "七页演示<span class=\"hint\">每一页都能直接上手玩</span>" }),
+    el("div", {
+      html:
+        '<table class="kv" style="font-size:13.5px">' +
+        '<tr><th style="width:7em">部首定位</th>' +
+        '<td>点一个字里的任意一块，看它是不是这个字的部首；页面还会告诉你这个字分几块、各块在哪。</td></tr>' +
+        '<tr><th>笔画动画</th>' +
+        '<td>看楷书按教学笔顺一笔一笔写出来，也看甲骨、篆书、金文、隶书的字形逐笔显现，还能生成描红底本。</td></tr>' +
+        '<tr><th>字形演变</th>' +
+        '<td>并排看早期的字和晚期的字，拖滑块看它怎么一步步变过去，哪几笔变了、消失了、新长出来。</td></tr>' +
+        '<tr><th>隶变算法</th>' +
+        '<td>把篆书按隶书的四条老规矩改一改：中间是按规矩算出来的示意，右边才是真实的隶书摹本。</td></tr>' +
+        '<tr><th>竖排版式</th>' +
+        '<td>把自己的文字排成古籍的样子：调列数与每列字数，看句读怎么挂在字的右上角，还能排成一整叶。</td></tr>' +
+        '<tr><th>教学实验室</th>' +
+        '<td>同一个字换几种角度看：部首、笔画、演变、隶变、竖排；还能让两个字比一比差在哪一笔。</td></tr>' +
+        '<tr><th>描红练习</th>' +
+        '<td>在浅色底本上描一遍，提交后看整体像不像、哪一笔最不像、哪一笔多写了，还能逐笔看分。</td></tr>' +
+        '</table>',
+    }),
+  ]));
+  built.overview.panel.appendChild(el("div", { class: "panel" }, [
+    el("h2", { text: "怎么跑起来" }),
+    el("ol", {
+      html: '<li>装依赖：<span class="mono">npm install</span></li>' +
+            '<li>起本地服务：<span class="mono">node tools/serve.ts</span>，然后打开 <span class="mono">http://127.0.0.1:8080/</span></li>' +
+            '<li><i>可选</i>：想用全量字形做实验，再同步一次（631 MB，只落在本地不入库）：' +
+            '<span class="mono">node tools/sync_glyphs.ts</span></li>',
+      style: "margin:0;padding-left:1.5em;color:var(--muted);font-size:13.5px;line-height:1.9",
+    }),
+    el("p", {
+      class: "note",
+      html: "浏览器对 <span class=\"mono\">file://</span> 下的 ES module 与 fetch 有安全限制，所以演示要走本地服务器。" +
+            "库本身是零运行时依赖的纯 TypeScript，<span class=\"mono\">npm run build</span> 产出 ESM + 类型声明。",
+    }),
+  ]));
+  built.overview.panel.appendChild(el("div", { class: "panel" }, [
+    el("h2", { text: "这个仓库的边界" }),
+    el("ul", {
+      html: "<li><b>不发布完整字形库。</b>字形来自兄弟仓库，这里只带一份<b>演示用的子集</b>（每层二十来个字），出处与许可见 <span class=\"mono\">demos/data/PROVENANCE.md</span>。</li>" +
+            "<li><b>不做字典。</b>字与字之间的释义、异体、版本对照是另一个仓库（<span class=\"mono\">hanzi-relations</span>）的事。</li>" +
+            "<li><b>不美化字形。</b>输出必须贴近原字形，这是硬规则。</li>" +
+            "<li><b>算法要可测。</b>每个算法都有单测，能在真实字形上验证的还要有端到端断言。</li>" +
+            "<li><b>不确定就说不确定。</b>部首定位置信度不足时返回空，而不是硬给一个答案。</li>",
+      style: "margin:0;padding-left:1.5em;color:var(--muted);font-size:13.5px;line-height:1.9",
+    }),
+  ]));
+
+  // ── 算法面板：标题 + iframe ───────────────────────────────
+  TABS.forEach(function (t) {
+    if (!t.src) return;
+    var frame = el("iframe", {
+      class: "demo-frame",
+      title: t.title,
+      // 先不设 src：iframe 首次激活才加载（见 activate），
+      // 打开总览不必把七页都取一遍。
+      // embed=1：演示页据此隐藏它自己的导航（外层已有 Tab 栏）
+      "data-src": t.src + "?embed=1",
+    });
+    built[t.id].frame = frame;
+    built[t.id].panel.appendChild(el("div", { class: "tabpanel-head" }, [
+      el("div", {}, [
+        el("h2", { text: t.title }),
+        el("p", { class: "sub", text: t.desc }),
+      ]),
+      el("a", {
+        class: "btn", href: t.src, target: "_blank", rel: "noopener",
+        text: "↗ 单独打开",
+      }),
+    ]));
+    built[t.id].panel.appendChild(frame);
+    frame.addEventListener("load", function () { fitFrame(frame); });
+  });
+
+  /**
+   * 让 iframe 高度贴合内容，免得页面里出现两层滚动条。
+   * 同源才能读到 contentDocument；读不到就保持固定高度。
+   */
+  function fitFrame(frame) {
+    var doc = null;
+    try { doc = frame.contentDocument; } catch (e) { return; }
+    if (!doc || !doc.body) return;
+    var apply = function () {
+      var h = doc.body.scrollHeight + 12;
+      frame.style.height = Math.max(520, Math.min(h, 1500)) + "px";
+    };
+    apply();
+    if (window.ResizeObserver && doc.body) {
+      try {
+        var ro = new ResizeObserver(apply);
+        ro.observe(doc.body);
+      } catch (e) { /* 观察不了就算了 */ }
+    }
+  }
+
+  // ── Tab 栏 ───────────────────────────────────────────────
+  TABS.forEach(function (t) {
+    var btn = el("button", {
+      id: "tab-" + t.id, role: "tab", type: "button",
+      "aria-controls": "panel-" + t.id,
+      "aria-selected": "false",
+    });
+    btn.appendChild(document.createTextNode(t.title));
+    if (t.algo) {
+      var a = el("span", { class: "algo", text: t.algo });
+      btn.appendChild(a);
+    }
+    btn.addEventListener("click", function () { activate(t.id); });
+    tabsEl.appendChild(btn);
+  });
+
+  var current = null;
+
+  function activate(id, fromHash) {
+    if (!byId[id]) id = "overview";
+    if (current === id) return;
+    current = id;
+    TABS.forEach(function (t) {
+      var on = t.id === id;
+      built[t.id].panel.hidden = !on;
+      var btn = document.getElementById("tab-" + t.id);
+      if (btn) btn.setAttribute("aria-selected", String(on));
+    });
+    // 算法页的 iframe 首次激活才建：打开总览不必把七页都取一遍
+    var b = built[id];
+    if (b && b.frame && !b.frame.getAttribute("src")) {
+      b.frame.setAttribute("src", b.frame.getAttribute("data-src") || "");
+    }
+    if (!fromHash) {
+      var hash = id === "overview" ? "" : "#" + id;
+      if (location.hash !== hash) {
+        // 用 replaceState 避免每个 Tab 都塞一条历史记录
+        if (history.replaceState) history.replaceState(null, "", location.pathname + location.search + hash);
+        else location.hash = hash;
+      }
+    }
+    window.scrollTo(0, 0);
+  }
+
+  tabsEl.addEventListener("keydown", function (e) {
+    if (e.key !== "ArrowRight" && e.key !== "ArrowLeft") return;
+    var i = TABS.findIndex(function (t) { return t.id === current; });
+    var next = e.key === "ArrowRight" ? (i + 1) % TABS.length : (i - 1 + TABS.length) % TABS.length;
+    activate(TABS[next].id);
+    var btn = document.getElementById("tab-" + TABS[next].id);
+    if (btn) btn.focus();
+  });
+
+  window.addEventListener("hashchange", function () {
+    activate((location.hash || "").replace(/^#/, "") || "overview", true);
+  });
+
+  activate((location.hash || "").replace(/^#/, "") || "overview", true);
+})();
+</script>
+</body>
+</html>

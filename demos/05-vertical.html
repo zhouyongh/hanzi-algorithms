@@ -1,0 +1,800 @@
+<!DOCTYPE html>
+<html lang="zh-Hans">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>竖排版式 · 汉字算法库</title>
+<link rel="stylesheet" href="./lib/demo.css">
+</head>
+<body>
+<header>
+  <h1>古文竖排与古籍版式</h1>
+  <p class="sub">
+    把自己的文字排成古籍的样子：列从右往左，列里从上往下；句读号挂在字的右上角，成对的括号引号要转过来。
+    可以调列数、每列字数、界行与鱼尾，排成半叶，或展开成一整叶（左右两半相对，中缝是版心与鱼尾）。
+  </p>
+  <nav>
+    <a href="./index.html">总览</a>
+    <a href="./index.html#radical">部首定位</a>
+    <a href="./index.html#stroke">笔画动画</a>
+    <a href="./index.html#evolution">字形演变</a>
+    <a href="./index.html#lishu">隶变算法</a>
+    <a href="./index.html#vertical" aria-current="page">竖排版式</a>
+    <a href="./index.html#lab">教学实验室</a>
+    <a href="./index.html#trace">描红练习</a>
+  </nav>
+</header>
+
+<main>
+  <div class="panel">
+    <div class="toolbar">
+      <label>文本</label>
+      <select id="sample"></select>
+      <textarea id="text" rows="2" cols="30"></textarea>
+      <button id="go" class="primary">排版</button>
+    </div>
+    <p class="note" id="source"></p>
+    <div class="toolbar">
+      <label>行数</label>
+      <input type="range" id="cols" min="3" max="12" value="5">
+      <span class="muted" id="colsv">5</span>
+      <label>每行字数</label>
+      <input type="range" id="rows" min="6" max="30" value="16">
+      <span class="muted" id="rowsv">16</span>
+      <label>字大</label>
+      <input type="range" id="size" min="12" max="40" value="24">
+      <span class="muted" id="sizev">24</span>
+    </div>
+    <div class="toolbar">
+      <label>界行宽</label>
+      <input type="range" id="gap" min="3" max="26" value="11">
+      <span class="muted" id="gapv">11</span>
+      <label>版心宽</label>
+      <input type="range" id="banxin" min="8" max="30" value="17">
+      <span class="muted" id="banxinv">17</span>
+      <label>鱼尾</label>
+      <select id="tail">
+        <option value="double">双鱼尾</option>
+        <option value="single">单鱼尾</option>
+        <option value="none">无</option>
+      </select>
+      <label>界框用色</label>
+      <select id="ink">
+        <option value="ink">墨</option>
+        <option value="zhu">朱</option>
+      </select>
+      <label><input type="checkbox" id="spread" checked> 整叶（两半相对）</label>
+    </div>
+    <div class="toolbar">
+      <label>版心题名</label>
+      <input type="text" id="title" size="10" value="千字文">
+      <label>叶次</label>
+      <input type="text" id="leaf" size="3" value="一">
+      <span class="muted">整叶两半的版心写同一个叶次（同一叶的正背两面）</span>
+    </div>
+  </div>
+
+  <div class="stage">
+    <div class="panel">
+      <h2>版面<span class="hint">列从右往左，列内自上而下；版心在书口一侧</span></h2>
+      <div class="canvas classic-stage"><div class="classic-leaf" id="sheet"></div></div>
+      <p class="note" id="punct-note"></p>
+    </div>
+
+    <div class="side">
+      <div class="panel">
+        <h2>版式参数</h2>
+        <table class="kv">
+          <tr><th>半叶</th><td id="r-leaf">—</td></tr>
+          <tr><th>版框</th><td id="r-frame">—</td></tr>
+          <tr><th>行×字</th><td id="r-grid">—</td></tr>
+          <tr><th>字数</th><td id="r-chars">—</td></tr>
+          <tr><th>句读</th><td id="r-punct">—</td></tr>
+          <tr><th>推进</th><td id="r-advance">—</td></tr>
+        </table>
+      </div>
+
+      <div class="panel">
+        <h2>行款推进</h2>
+        <p class="note" style="margin:0">
+          这里给出「下一个字写在哪」的次序：列从右往左、列内自上而下。
+          点「逐字書寫」就按这个次序一个字一个字写出来——古籍里的抄手就是这么一行一行写下去的。
+        </p>
+        <div class="toolbar" style="margin:10px 0 0">
+          <button id="play">逐字書寫</button>
+          <span class="muted" id="playpos">—</span>
+        </div>
+      </div>
+
+      <div class="panel">
+        <h2>句读点号的悬挂位</h2>
+        <p class="note" style="margin:0">
+          竖排时「。，、；」要挪到字格的<strong>右上角</strong>，不是横排时的左下角；
+          成对符号还要转 90°。这是古籍排印里最容易被忽略的一条规矩。
+        </p>
+        <div id="punct-demo" style="margin-top:10px"></div>
+      </div>
+
+      <div class="panel">
+        <h2>版面构件</h2>
+        <div class="legend classic-legend">
+          <span><i style="background:#1c1b18"></i>版框（四周双边）</span>
+          <span><i style="background:#1c1b18"></i>界行（列间双线）</span>
+          <span><i style="background:#1c1b18"></i>版心（书口一侧）</span>
+          <span><i style="background:#1c1b18"></i>鱼尾（黑鱼尾）</span>
+          <span><i style="background:#9c2b21"></i>句读（朱笔）</span>
+        </div>
+      </div>
+    </div>
+  </div>
+</main>
+
+<script src="./lib/hanzi-algorithms.js"></script>
+<script src="./lib/demo.js"></script>
+<script>
+const H = window.HanziAlgorithms;
+const { el } = window.HanziDemo;
+
+const $ = (id) => document.getElementById(id);
+
+/* ── 文本预设 ──────────────────────────────────────────────
+   真实古籍原文必须注明出处；自造文本要说明是测试文本。
+   繁排用繁体字，因为古籍版式配的是宋刻本的字面。 */
+const SAMPLES = [
+  {
+    id: "qianziwen",
+    label: "《千字文》（前十六句）",
+    title: "千字文",
+    source: "出处：梁·周興嗣《千字文》開篇十六句。《千字文》為傳世蒙學讀物，非本頁杜撰。",
+    text:
+      "天地玄黃，宇宙洪荒。日月盈昃，辰宿列張。寒來暑往，秋收冬藏。" +
+      "閏餘成歲，律呂調陽。雲騰致雨，露結為霜。金生麗水，玉出崑岡。" +
+      "劍號巨闕，珠稱夜光。果珍李柰，菜重芥薑。海鹹河淡，鱗潛羽翔。" +
+      "龍師火帝，鳥官人皇。始制文字，乃服衣裳。推位讓國，有虞陶唐。" +
+      "弔民伐罪，周發殷湯。坐朝問道，垂拱平章。愛育黎首，臣伏戎羌。" +
+      "遐邇壹體，率賓歸王。",
+  },
+  {
+    id: "lunyu",
+    label: "《論語·學而》首章",
+    title: "論語學而",
+    source: "出处：《論語·學而》第一篇首章。",
+    text: "學而時習之，不亦說乎？有朋自遠方來，不亦樂乎？人不知而不慍，不亦君子乎？",
+  },
+  {
+    id: "daodejing",
+    label: "《道德經》首章",
+    title: "道德經",
+    source: "出处：《老子》第一章。",
+    text:
+      "道可道，非常道。名可名，非常名。無名天地之始；有名萬物之母。" +
+      "故常無欲，以觀其妙；常有欲，以觀其徼。此兩者，同出而異名，同謂之玄。",
+  },
+  {
+    id: "shijing",
+    label: "《詩經·關雎》",
+    title: "詩經關雎",
+    source: "出处：《詩經·周南·關雎》首章。",
+    text: "關關雎鳩，在河之洲。窈窕淑女，君子好逑。參差荇菜，左右流之。",
+  },
+  {
+    id: "sunzi",
+    label: "《孫子兵法·始計》",
+    title: "孫子兵法",
+    source: "出处：《孫子兵法·始計》首章。",
+    text: "孫子曰：兵者，國之大事，死生之地，存亡之道，不可不察也。故經之以五事，校之以計，而索其情。",
+  },
+  {
+    id: "test",
+    label: "測試文本（無出處）",
+    title: "測試",
+    source:
+      "測試文本：本頁自造，用來檢驗句讀、頓號、括號與引號的排版規則；不是古籍引文。",
+    text:
+      "測試文本：排版要檢查句讀點號（句號、逗號、頓號）落在什麼位置，" +
+      "也要檢查成對符號「」『』（）是否轉向，還有破折號——與省略號……的處理。",
+  },
+];
+
+/* ── 顏色 ─────────────────────────────────────────────────
+   墨與朱：界框可用墨線（雕版常見），也可用朱絲欄（紅格）。 */
+const COLORS = {
+  paper: "#efe2c6",
+  paperEdge: "#e0cfaa",
+  ink: "#1c1b18",
+  zhu: "#9c2b21",
+  grain: "#6b5a3c",
+};
+
+/* ── 工具 ────────────────────────────────────────────────── */
+
+/** 把數值夾進區間（非數字當下界）。 */
+function clampNum(v, lo, hi) {
+  const num = Number(v);
+  if (!Number.isFinite(num)) return lo;
+  return Math.min(Math.max(num, lo), hi);
+}
+
+/** XML 文本轉義：文字框可以隨便輸入，拼進 SVG 前必須轉義。 */
+function esc(s) {
+  return String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+}
+
+/** 保留兩位小數，免得 SVG 裡拖出一長串浮點尾數。 */
+function n(v) {
+  return Math.round(v * 100) / 100;
+}
+
+/* ── 版式（包住 layoutClassicPage 的調用） ─────────────── */
+
+/**
+ * 由界面參數算出一張半葉。
+ *
+ * 版心的幾何是庫裡定的（版心跨在版框左邊界上），所以行寬要留夠餘白：
+ * 左半列的字格左邊距必須大於版心壓進版框的那一段，否則版心的右線會壓到字上。
+ *
+ * 算出來的量（字距、行寬）一併帶著走：落字與繪製都要用，
+ * 外面再算一遍容易算出兩份不一致的。
+ */
+function buildPage(opts) {
+  // 參數先夾一遍再算：版面是純幾何，NaN 一路傳下去會讓整張圖變成 NaN。
+  const charSize = clampNum(opts.charSize, 8, 60);
+  const columns = Math.max(1, Math.floor(clampNum(opts.columns, 1, 40)));
+  const rowsPerColumn = Math.max(1, Math.floor(clampNum(opts.rowsPerColumn, 1, 60)));
+  const columnGap = clampNum(opts.columnGap, 2, 40);
+  const banxinWidth = clampNum(opts.banxinWidth, 6, 60);
+  const charGap = Math.max(1, Math.round(charSize * 0.08));
+  const colWidth = charSize * 1.65;
+  const frameWidth = columns * colWidth + (columns - 1) * columnGap;
+  const frameHeight = rowsPerColumn * (charSize + charGap) - charGap;
+  const marginTop = Math.round(frameHeight * 0.09);
+  const marginBottom = Math.round(frameHeight * 0.11);
+  const marginLeft = Math.round(banxinWidth * 1.5 + 10);
+  const marginRight = Math.round(Math.max(12, frameWidth * 0.025));
+
+  const page = H.layoutClassicPage({
+    leafWidth: marginLeft + frameWidth + marginRight,
+    leafHeight: marginTop + frameHeight + marginBottom,
+    columns,
+    rowsPerColumn,
+    columnGap,
+    marginTop,
+    marginBottom,
+    marginLeft,
+    marginRight,
+    fishtail: opts.fishtail,
+    banxinWidth,
+    banxinCenter: 0.5,
+    banxinHeightRatio: 0.34,
+    title: opts.title,
+  });
+
+  return {
+    page,
+    charSize,
+    charGap,
+    colWidth,
+    columns,
+    rowsPerColumn,
+    columnGap,
+    ink: opts.ink,
+    title: opts.title,
+    leafNo: opts.leafNo,
+  };
+}
+
+/* ── 落字（包住 placeText / layoutVertical / punctuationShift） ── */
+
+/**
+ * 把一段文字排進半葉。
+ *
+ * 三個庫函數分工：
+ * - placeText：給每個字「落在哪一列第幾行」的格子（版式的行列框）；
+ * - layoutVertical：給每個字「是不是句讀、要不要轉向」的豎排信息；
+ * - punctuationShift：給句讀點號的懸掛位移（右上方）與成對符號的轉向。
+ *
+ * 句讀有三種落法：
+ * 1. 列中的句讀 —— 字格右上角（庫裡 punctuationShift 的規則）；
+ * 2. 列末的句讀 —— 沉到本列的右下角（版框內側、界行左邊）。留在字格右上角會頂著版框，
+ *    古籍裡列末的句讀也多半是這麼處理的；
+ * 3. 列首的句讀 —— 機械分列必然會讓句讀頂到下一列的頭上，這時把它拉回上一列的右下角，
+ *    該列首格留空（避頭尾），句讀就不會孤零零地掛在列首。
+ *
+ * @param mirror 左半葉（整葉的背面）要把橫座標整體鏡像：字形仍要正著，
+ *   所以鏡像只作用在座標上，旋轉方向跟著反一次。
+ */
+function placeHalf(built, text, mirror) {
+  const page = built.page;
+  const charSize = built.charSize;
+  const charGap = built.charGap;
+  const colCount = page.columns.length;
+
+  const placed = H.placeText(page, text, { charSize, charGap });
+  const cells = H.layoutVertical(text, {
+    charSize,
+    charGap,
+    lineGap: built.columnGap,
+    rowsPerColumn: built.rowsPerColumn,
+  });
+
+  // 句讀點號右移的餘地：到右鄰列字格左邊界還有多遠。
+  // punctuationShift 會拿 lineGap 收緊右移量，給足它點號才不會越界。
+  const room = built.columnGap + (built.colWidth - charSize) / 2;
+
+  const out = [];
+  for (let i = 0; i < placed.length; i += 1) {
+    const p = placed[i];
+    const c = cells[i] || { column: p.column, row: p.row };
+    // 左半葉：文字的第 t 列排在版式的第 n-1-t 列（貼著版心開始讀）
+    const colIndex = mirror ? colCount - 1 - c.column : c.column;
+    const col = page.columns[colIndex];
+    if (!col) continue;
+
+    const cellLeft = col.x + (col.width - charSize) / 2;
+    const cellTop = col.y + c.row * (charSize + charGap);
+    const item = {
+      char: p.char,
+      step: i,
+      size: charSize,
+      x: cellLeft + charSize / 2,
+      y: cellTop + charSize / 2,
+      rotate: 0,
+      punct: false,
+      corner: false,
+    };
+
+    const shift = c.punctuation ? c.shift || H.punctuationShift(c.char, charSize, room) : null;
+    if (!shift) {
+      out.push(item);
+      continue;
+    }
+    item.punct = true;
+
+    if (shift.rotate) {
+      // 成對符號轉向：開符號順時針、閉符號逆時針；鏡像半葉要反過來轉
+      item.rotate = (mirror ? -1 : 1) * shift.direction * 90;
+      out.push(item);
+      continue;
+    }
+
+    const lastInColumn = i === placed.length - 1 || (cells[i + 1] && cells[i + 1].column !== c.column);
+    const firstInColumn = c.row === 0 && c.column > 0;
+
+    if (firstInColumn) {
+      // 列首的句讀：拉回上一列（讀序上的前一列）的右下角
+      const prevIndex = mirror ? colIndex + 1 : colIndex - 1;
+      const prev = prevIndex >= 0 && prevIndex < colCount ? page.columns[prevIndex] : null;
+      if (prev) {
+        item.x = cornerAnchor(page, prev, charSize, mirror).x;
+        item.y = cornerAnchor(page, prev, charSize, mirror).y;
+        item.corner = true;
+      } else {
+        // 沒有上一列可拉（整葉拆分後的左半葉首字），留在原位
+        item.x = cellLeft + charSize / 2 + (mirror ? -shift.dx : shift.dx);
+        item.y = cellTop + charSize / 2 + shift.dy;
+      }
+      out.push(item);
+      continue;
+    }
+
+    if (lastInColumn) {
+      // 列末的句讀：沉到本列的右下角
+      const anchor = cornerAnchor(page, col, charSize, mirror);
+      item.x = anchor.x;
+      item.y = anchor.y;
+      item.corner = true;
+      out.push(item);
+      continue;
+    }
+
+    // 列中的句讀：字格右上角（庫裡 punctuationShift 的規則）。
+    // 鏡像半葉的橫座標會被翻過去，所以右移量要反過來記，
+    // 否則點號會落到字格的左上角（與直排的「右上角」規則相反）。
+    const dx = mirror ? -shift.dx : shift.dx;
+    item.x = cellLeft + charSize / 2 + dx;
+    item.y = cellTop + charSize / 2 + shift.dy;
+    out.push(item);
+  }
+  return out;
+}
+
+/**
+ * 列的右下角（句讀沉底的位置）。
+ *
+ * 取「版框內側、界行左邊」的那一小塊空當：點號的墨跡半徑按字號估算，
+ * 再往裡挪一點，保證整個點號落在版框之內。
+ *
+ * 座標先算「最終畫面上」的位置，再換算成版式座標——鏡像半葉的左右是反的。
+ *
+ * @param mirror 鏡像半葉時，列的「右」邊是版式座標裡的左邊（鏡像把左右換了）
+ */
+function cornerAnchor(page, col, charSize, mirror) {
+  const ink = charSize * 0.12;
+  // 點號的墨跡落在 em 盒的左下角：em 盒中心要比墨跡往右上偏一點
+  const finalRight = mirror ? page.leaf.width - col.x : col.x + col.width;
+  const finalX = finalRight - ink - 1 + charSize * 0.25;
+  const finalY = page.frame.y + page.frame.height - ink - 1 - charSize * 0.25;
+  return {
+    x: mirror ? page.leaf.width - finalX : finalX,
+    y: finalY,
+  };
+}
+
+/* ── 繪製 ───────────────────────────────────────────────── */
+
+/**
+ * 畫半葉：紙、版框、界行、版心、魚尾、文字。
+ *
+ * 鏡像半葉用「座標鏡像」而不是 SVG 變換：變換會把字形一起翻過去（字是反的），
+ * 逐字鏡像座標才能得到版心在右、字正着的背面半葉。
+ */
+function renderHalf(built, chars, mirror, offsetX, leafNo, stepOffset) {
+  const page = built.page;
+  const leafWidth = page.leaf.width;
+  const line = built.ink === "zhu" ? COLORS.zhu : COLORS.ink;
+  const frame = page.frame;
+
+  /** 鏡像後的橫座標。 */
+  const mx = (x) => (mirror ? offsetX + leafWidth - x : offsetX + x);
+  /** 鏡像後的矩形左邊。 */
+  const mrx = (x, w) => (mirror ? offsetX + leafWidth - x - w : offsetX + x);
+
+  const parts = [];
+
+  // 紙面
+  parts.push(
+    `<rect x="${n(mrx(0, leafWidth))}" y="0" width="${n(leafWidth)}" height="${n(page.leaf.height)}" fill="${COLORS.paper}"/>`
+  );
+  parts.push(
+    `<rect x="${n(mrx(0, leafWidth))}" y="0" width="${n(leafWidth)}" height="${n(page.leaf.height)}" fill="url(#leafShade)"/>`
+  );
+
+  // 版框：四周雙邊（外框粗、內框細）
+  parts.push(
+    `<rect x="${n(mrx(frame.x, frame.width))}" y="${n(frame.y)}" width="${n(frame.width)}" height="${n(frame.height)}" ` +
+      `fill="none" stroke="${line}" stroke-width="2.4"/>`
+  );
+  const inner = 5;
+  parts.push(
+    `<rect x="${n(mrx(frame.x + inner, frame.width - inner * 2))}" y="${n(frame.y + inner)}" ` +
+      `width="${n(frame.width - inner * 2)}" height="${n(frame.height - inner * 2)}" ` +
+      `fill="none" stroke="${line}" stroke-width="0.9"/>`
+  );
+
+  // 界行：列間雙線，線距就是 rule.gap，整對居中在列間空當裡
+  for (const rule of page.columnRules) {
+    const center = rule.x + built.columnGap / 2;
+    const x1 = center - rule.gap / 2;
+    const x2 = center + rule.gap / 2;
+    parts.push(
+      `<line x1="${n(mx(x1))}" y1="${n(rule.y0)}" x2="${n(mx(x1))}" y2="${n(rule.y1)}" stroke="${line}" stroke-width="0.9"/>`
+    );
+    parts.push(
+      `<line x1="${n(mx(x2))}" y1="${n(rule.y0)}" x2="${n(mx(x2))}" y2="${n(rule.y1)}" stroke="${line}" stroke-width="0.9"/>`
+    );
+  }
+
+  // 版心（書口一側的窄欄）
+  const banxin = page.banxin;
+  parts.push(
+    `<rect x="${n(mrx(banxin.x, banxin.width))}" y="${n(banxin.y)}" width="${n(banxin.width)}" height="${n(banxin.height)}" ` +
+      `fill="none" stroke="${line}" stroke-width="0.9"/>`
+  );
+
+  // 魚尾：上魚尾朝下、下魚尾朝上，都是指向行間的黑魚尾
+  for (const ft of page.fishtails) {
+    const band = ft.height * 0.38;
+    const pts =
+      ft.direction === "down"
+        ? [
+            [ft.x, ft.y],
+            [ft.x + ft.width, ft.y],
+            [ft.x + ft.width, ft.y + band],
+            [ft.x + ft.width / 2, ft.y + ft.height],
+            [ft.x, ft.y + band],
+          ]
+        : [
+            [ft.x, ft.y + ft.height],
+            [ft.x + ft.width, ft.y + ft.height],
+            [ft.x + ft.width, ft.y + ft.height - band],
+            [ft.x + ft.width / 2, ft.y],
+            [ft.x, ft.y + ft.height - band],
+          ];
+    parts.push(
+      `<polygon points="${pts.map(([x, y]) => `${n(mx(x))},${n(y)}`).join(" ")}" fill="${line}"/>`
+    );
+  }
+
+  // 版心題名：書名在上、葉次在下，寫在魚尾之間
+  const titleChars = Array.from(built.title || "");
+  const tailCount = page.fishtails.length;
+  const areaTop = banxin.y + (tailCount > 0 ? banxin.height * 0.26 : banxin.height * 0.06);
+  const areaBottom = banxin.y + (tailCount > 1 ? banxin.height * 0.72 : banxin.height * 0.94);
+  const titleSize = Math.min(
+    banxin.width * 0.72,
+    titleChars.length > 0 ? (areaBottom - areaTop) / titleChars.length : banxin.width
+  );
+  const titleX = banxin.x + banxin.width / 2;
+  titleChars.forEach((ch, i) => {
+    const y = areaTop + ((i + 0.5) * (areaBottom - areaTop)) / titleChars.length;
+    parts.push(
+      `<text x="${n(mx(titleX))}" y="${n(y)}" text-anchor="middle" dominant-baseline="central" ` +
+        `font-size="${n(titleSize)}" fill="${line}">${esc(ch)}</text>`
+    );
+  });
+  if (leafNo) {
+    const noSize = Math.min(banxin.width * 0.72, banxin.height * 0.12);
+    const noY = banxin.y + banxin.height * (tailCount > 1 ? 0.88 : 0.86);
+    parts.push(
+      `<text x="${n(mx(titleX))}" y="${n(noY)}" text-anchor="middle" dominant-baseline="central" ` +
+        `font-size="${n(noSize)}" fill="${line}">${esc(leafNo)}</text>`
+    );
+  }
+
+  // 字
+  for (const item of chars) {
+    const transform = item.rotate ? ` transform="rotate(${item.rotate} ${n(item.x)} ${n(item.y)})"` : "";
+    const fill = item.punct ? COLORS.zhu : COLORS.ink;
+    const cls = item.punct ? ` class="classic-punct${item.corner ? " classic-corner" : ""}"` : "";
+    // data-step 是全文的次序（整葉的左半葉接著右半葉往下數），
+    // 「逐字書寫」按它一個字一個字地亮。
+    parts.push(
+      `<text${cls} data-step="${item.step + stepOffset}" x="${n(mx(item.x))}" y="${n(item.y)}" text-anchor="middle" ` +
+        `dominant-baseline="central" font-size="${n(item.size)}" fill="${fill}"${transform}>${esc(item.char)}</text>`
+    );
+  }
+
+  return parts.join("");
+}
+
+/**
+ * 畫一張紙（半葉或整葉）。
+ *
+ * 整葉＝左右兩半相對：右半葉是正面，左半葉是背面（鏡像）。
+ * 文字按「右半葉先排、裝不下的進左半葉」分配，讀序正好接得上。
+ */
+function renderSheet(built, opts) {
+  const page = built.page;
+  const capacity = page.columns.length * page.rowsPerColumn;
+  const text = opts.text;
+  const spread = opts.spread;
+
+  const rightText = spread ? Array.from(text).slice(0, capacity).join("") : Array.from(text).join("");
+  const leftText = spread ? Array.from(text).slice(capacity).join("") : "";
+
+  const rightChars = placeHalf(built, rightText, false);
+  const leftChars = spread ? placeHalf(built, leftText, true) : [];
+
+  const gap = spread ? 10 : 0;
+  const totalWidth = spread ? page.leaf.width * 2 + gap : page.leaf.width;
+  const height = page.leaf.height;
+
+  const defs =
+    `<defs>` +
+    `<linearGradient id="leafShade" x1="0" y1="0" x2="0" y2="1">` +
+    `<stop offset="0" stop-color="#ffffff" stop-opacity="0.28"/>` +
+    `<stop offset="0.55" stop-color="#ffffff" stop-opacity="0"/>` +
+    `<stop offset="1" stop-color="${COLORS.paperEdge}" stop-opacity="0.55"/>` +
+    `</linearGradient>` +
+    `<filter id="leafGrain" x="0" y="0" width="100%" height="100%">` +
+    `<feTurbulence type="fractalNoise" baseFrequency="0.85" numOctaves="3" seed="7" result="noise"/>` +
+    `<feColorMatrix in="noise" type="saturate" values="0"/>` +
+    `<feComponentTransfer><feFuncA type="linear" slope="0.09"/></feComponentTransfer>` +
+    `</filter>` +
+    `</defs>`;
+
+  const grain =
+    `<rect x="0" y="0" width="${n(totalWidth)}" height="${n(height)}" filter="url(#leafGrain)" opacity="0.5" ` +
+    `pointer-events="none"/>`;
+
+  const right = renderHalf(built, rightChars, false, spread ? page.leaf.width + gap : 0, built.leafNo, 0);
+  const left = spread ? renderHalf(built, leftChars, true, 0, built.leafNo, capacity) : "";
+
+  // 中縫的陰影：兩半葉之間的折痕
+  const seam =
+    spread && gap > 0
+      ? `<rect x="${n(page.leaf.width)}" y="0" width="${n(gap)}" height="${n(height)}" fill="#8a7550" opacity="0.18"/>`
+      : "";
+
+  return (
+    `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${n(totalWidth)} ${n(height)}" ` +
+    `width="${n(totalWidth)}" height="${n(height)}" font-family="'Noto Serif CJK SC','Source Han Serif SC','Songti SC',SimSun,serif">` +
+    defs +
+    (spread ? right + seam + left : right) +
+    grain +
+    `</svg>`
+  );
+}
+
+/* ── 界面 ───────────────────────────────────────────────── */
+
+function readOptions() {
+  return {
+    text: $("text").value,
+    columns: clampNum($("cols").value, 1, 40),
+    rowsPerColumn: clampNum($("rows").value, 1, 60),
+    charSize: clampNum($("size").value, 8, 60),
+    columnGap: clampNum($("gap").value, 2, 40),
+    banxinWidth: clampNum($("banxin").value, 6, 60),
+    fishtail: $("tail").value,
+    ink: $("ink").value,
+    spread: $("spread").checked,
+    title: $("title").value.trim(),
+    leafNo: $("leaf").value.trim() || "一",
+  };
+}
+
+let playTimer = null;
+let playStep = 0;
+let playTotal = 0;
+
+function render() {
+  const opts = readOptions();
+  const built = buildPage(opts);
+  const page = built.page;
+  const capacity = page.columns.length * page.rowsPerColumn;
+  const chars = Array.from(opts.text);
+  const used = opts.spread ? Math.min(chars.length, capacity * 2) : Math.min(chars.length, capacity);
+
+  $("sheet").innerHTML = renderSheet(built, opts);
+
+  const puncts = chars.filter((ch) => H.punctuationShift(ch, opts.charSize) !== null);
+  const steps = H.advance(chars.length, {
+    charSize: opts.charSize,
+    charGap: built.charGap,
+    lineGap: opts.columnGap,
+    rowsPerColumn: opts.rowsPerColumn,
+  });
+
+  $("r-leaf").textContent = `${Math.round(page.leaf.width)} × ${Math.round(page.leaf.height)}`;
+  $("r-frame").textContent = `${Math.round(page.frame.width)} × ${Math.round(page.frame.height)}`;
+  $("r-grid").textContent = `${page.columns.length} 行 × ${page.rowsPerColumn} 字`;
+  $("r-chars").textContent =
+    used === chars.length
+      ? `${chars.length}`
+      : `${used} / ${chars.length}（版面裝不下，多餘的沒排上）`;
+  $("r-punct").textContent = puncts.length
+    ? `${puncts.length} 個（${puncts.map((ch) => ch.char).join("")}）`
+    : "無";
+  $("r-advance").textContent = `${steps.length} 步，換列 ${steps.filter((s) => s.columnStart).length} 次`;
+
+  const notes = [];
+  if (used < chars.length) {
+    notes.push(`文字超出版面容量（半葉 ${capacity} 字${opts.spread ? "×兩半" : ""}），多出的 ${chars.length - used} 字沒有排上。`);
+  }
+  notes.push(
+    opts.spread
+      ? "整葉：右半葉是正面，左半葉是背面（鏡像），版心與魚尾相對成中縫。"
+      : "半葉：版框、界行（雙線）、版心與魚尾都在，版心在書口（左侧）一邊。"
+  );
+  notes.push("句讀：列中的點號在字格右上角，列末的沉到列的右下角，列首的拉回上一列。");
+  $("punct-note").textContent = notes.join(" ");
+
+  playTotal = chars.length;
+  if (playStep > playTotal) playStep = playTotal;
+  applyStep();
+}
+
+function applyStep() {
+  const nodes = $("sheet").querySelectorAll("[data-step]");
+  nodes.forEach((node) => {
+    const i = Number(node.getAttribute("data-step"));
+    // 沒在「逐字書寫」時整版都看得見；播放時還沒寫到的字淡下去
+    node.setAttribute("opacity", playTimer && i >= playStep ? "0.12" : "1");
+  });
+  $("playpos").textContent = playTotal > 0 ? `${playStep} / ${playTotal} 字` : "—";
+}
+
+function togglePlay() {
+  if (playTimer) {
+    clearInterval(playTimer);
+    playTimer = null;
+    $("play").textContent = "逐字書寫";
+    return;
+  }
+  if (playStep >= playTotal) playStep = 0;
+  $("play").textContent = "停止";
+  playTimer = setInterval(() => {
+    playStep += 1;
+    if (playStep > playTotal) {
+      clearInterval(playTimer);
+      playTimer = null;
+      $("play").textContent = "逐字書寫";
+    }
+    applyStep();
+  }, 260);
+}
+
+/* ── 句讀懸掛位的小實例 ─────────────────────────────────── */
+
+function demoPunctuation() {
+  const box = $("punct-demo");
+  box.innerHTML = "";
+  const size = 54;
+  for (const ch of ["。", "，", "、", "「", "（"]) {
+    const cell = el("div", {
+      class: "classic-punct-cell",
+      style: `width:${size}px;height:${size}px`,
+    });
+    const t = el("span", {
+      text: ch,
+      style: "position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);font-size:22px",
+    });
+    cell.appendChild(t);
+    const shift = H.punctuationShift(ch, size);
+    if (shift) {
+      cell.appendChild(
+        el("span", {
+          class: "mono",
+          style: "position:absolute;right:3px;bottom:2px;font-size:9px;color:var(--muted)",
+          text: shift.rotate ? "轉向" : "右上",
+        })
+      );
+      // 示意：把點號挪到右上角
+      if (!shift.rotate) {
+        t.style.left = `${50 + (shift.dx / size) * 50}%`;
+        t.style.top = `${50 + (shift.dy / size) * 50}%`;
+      }
+    }
+    box.appendChild(cell);
+  }
+}
+
+/* ── 啟動 ───────────────────────────────────────────────── */
+
+function init() {
+  const select = $("sample");
+  SAMPLES.forEach((s) => {
+    select.appendChild(el("option", { value: s.id, text: s.label }));
+  });
+  select.value = SAMPLES[0].id;
+  $("text").value = SAMPLES[0].text;
+  $("title").value = SAMPLES[0].title;
+  $("source").textContent = SAMPLES[0].source;
+
+  select.addEventListener("change", () => {
+    const s = SAMPLES.find((item) => item.id === select.value);
+    if (!s) return;
+    $("text").value = s.text;
+    $("title").value = s.title;
+    $("source").textContent = s.source;
+    playStep = 0;
+    render();
+  });
+
+  $("text").addEventListener("input", () => {
+    // 手改過的文本不再算古籍引文，來源說明要跟著改
+    $("source").textContent = "自編文本：以上文字由你在本頁輸入，頁面不保證它是古籍引文。";
+    render();
+  });
+
+  $("go").addEventListener("click", () => {
+    playStep = 0;
+    render();
+  });
+
+  for (const id of ["cols", "rows", "size", "gap", "banxin"]) {
+    $(id).addEventListener("input", () => {
+      $(`${id}v`).textContent = $(id).value;
+      render();
+    });
+  }
+  for (const id of ["tail", "ink"]) {
+    $(id).addEventListener("change", render);
+  }
+  $("spread").addEventListener("change", () => {
+    playStep = 0;
+    render();
+  });
+  $("title").addEventListener("input", render);
+  $("leaf").addEventListener("input", render);
+  $("play").addEventListener("click", togglePlay);
+
+  render();
+  demoPunctuation();
+}
+
+init();
+</script>
+</body>
+</html>

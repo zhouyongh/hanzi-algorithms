@@ -1,0 +1,57 @@
+name: Deploy demos to GitHub Pages
+
+# 把演示页挂到 GitHub Pages：这个库的价值全在「点开就能看」，
+# 只发代码的话别人 clone 下来还得先同步 631 MB 素材才看得到效果。
+#
+# 与兄弟仓库 hanzi-glyphs-svg 的 pages.yml 有两点不同：
+# 1. 那边因为字形有 1.1 GB，站点只能从 CDN 取字形；这边**字形子集是入库的**，
+#    站点自足，不用联网取字形。
+# 2. 那边站点根放的是浏览页；这边把 demos/ 整个摊到站点根，
+#    于是 `https://<账号>.github.io/hanzi-algorithms/` 直接就是那个单页 Tab 浏览页。
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 组装站点
+        run: |
+          mkdir -p _site
+          # 只放演示页与演示用的字形子集。
+          # **不要** cp -r assets —— 那是本机的完整素材（631 MB），本来就不入库。
+          cp -r demos/. _site/
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: _site
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4
+        # 注意：`enablement` 是 actions/configure-pages 的输入，**deploy-pages@v4 不认它**
+        # （写了会被忽略，日志里只留一句 "Unexpected input(s) 'enablement'"）。
+        # 站点必须先在 Settings → Pages 里把 Source 选成 GitHub Actions，
+        # 或用 API 启用：POST /repos/{owner}/{repo}/pages  {"build_type":"workflow"}。
+        # 本仓 2026-10-25 首次部署就踩了这一个：build 成功、deploy 报
+        # "Creating Pages deployment failed / HttpError: Not Found"。

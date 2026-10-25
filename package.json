@@ -1,0 +1,80 @@
+{
+  "name": "hanzi-algorithms",
+  "version": "0.1.0",
+  "description": "汉字结构计算库：部首定位、笔画切分、构形分解、跨书体形变、竖排版式",
+  "type": "module",
+  "license": "MIT",
+  "engines": {
+    "node": ">=22.18"
+  },
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    },
+    "./geometry": {
+      "types": "./dist/geometry/index.d.ts",
+      "import": "./dist/geometry/index.js"
+    },
+    "./raster": {
+      "types": "./dist/raster/index.d.ts",
+      "import": "./dist/raster/index.js"
+    },
+    "./structure": {
+      "types": "./dist/structure/index.d.ts",
+      "import": "./dist/structure/index.js"
+    },
+    "./morph": {
+      "types": "./dist/morph/index.d.ts",
+      "import": "./dist/morph/index.js"
+    },
+    "./layout": {
+      "types": "./dist/layout/index.d.ts",
+      "import": "./dist/layout/index.js"
+    }
+  },
+  "files": [
+    "dist",
+    "src",
+    "demos",
+    "README.md",
+    "LICENSE-CODE",
+    "LICENSE-DOCS"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "clean": "node -e \"require('fs').rmSync('dist',{recursive:true,force:true})\"",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "typecheck:all": "tsc -p tsconfig.tools.json",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "sync": "node tools/sync_glyphs.ts",
+    "demo:glyphs": "node tools/build_demo_glyphs.ts",
+    "index": "node tools/build_index.ts",
+    "data": "node tools/build_data.ts",
+    "serve": "node tools/serve.ts",
+    "eval": "node tools/eval_radical.ts"
+  },
+  "keywords": [
+    "hanzi",
+    "chinese",
+    "radical",
+    "ideographic-description-sequences",
+    "glyph",
+    "seal-script",
+    "oracle-bone",
+    "vertical-typesetting",
+    "morph"
+  ],
+  "devDependencies": {
+    "@types/node": "^22.10.2",
+    "animejs": "^4.5.0",
+    "esbuild": "^0.28.2",
+    "hanzi-writer": "^3.7.3",
+    "hanzi-writer-data": "^2.0.1",
+    "typescript": "^5.7.2",
+    "vitest": "^2.1.8"
+  }
+}
